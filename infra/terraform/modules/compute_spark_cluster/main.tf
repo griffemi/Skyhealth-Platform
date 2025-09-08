@@ -9,9 +9,9 @@ resource "google_compute_instance" "master" {
     subnetwork   = var.network
     access_config {}
   }
-  metadata_startup_script = <<-EOT
+metadata_startup_script = <<-EOT
 #!/bin/bash
-apt-get update && apt-get install -y default-jdk python3
+apt-get update && apt-get install -y default-jdk python3.13
 EOT
 }
 
@@ -30,9 +30,9 @@ resource "google_compute_instance_template" "worker" {
     preemptible       = true
     automatic_restart = false
   }
-  metadata_startup_script = <<-EOT
+metadata_startup_script = <<-EOT
 #!/bin/bash
-apt-get update && apt-get install -y default-jdk python3
+apt-get update && apt-get install -y default-jdk python3.13
 /opt/spark/sbin/start-worker.sh spark://${google_compute_instance.master.network_interface[0].network_ip}:7077
 EOT
 }

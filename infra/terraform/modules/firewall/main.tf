@@ -1,5 +1,5 @@
 resource "google_compute_firewall" "allow" {
-  name    = "skyfeed-allow"
+  name    = "skyhealth-allow"
   network = var.network
   allow {
     protocol = "tcp"

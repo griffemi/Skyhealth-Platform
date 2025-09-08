@@ -1,24 +1,24 @@
 [tool.poetry]
-name = "skyfeed"
+name = "skyhealth"
 version = "0.1.0"
 description = "Weather ETL platform"
-authors = ["Skyfeed <engineering@skyfeed.local>"]
-packages = [{include = "spark"}, {include = "apps"}, {include = "skyfeed"}]
+authors = ["Skyhealth <engineering@skyhealth.local>"]
+packages = [{include = "spark"}, {include = "apps"}, {include = "skyhealth"}]
 
 [tool.poetry.dependencies]
 python = "^3.13"
-pyspark = "^3.5.0"
-pyiceberg = "^0.6.0"
-streamlit = "^1.33.0"
-folium = "^0.15.1"
-dbt-duckdb = "^1.6.0"
-dbt-bigquery = "^1.6.0"
-google-cloud-storage = "^2.14.0"
-google-cloud-compute = "^1.13.0"
-pydantic = "^2.6.0"
+pyspark = "^4.0.1"
+pyiceberg = "^0.9.1"
+streamlit = "^1.49.1"
+folium = "^0.20.0"
+dbt-duckdb = "^1.9.5"
+dbt-bigquery = "^1.10.2"
+google-cloud-storage = "^2.19.0"
+google-cloud-compute = "^1.37.0"
+pydantic = "^2.11.7"
 
 [tool.poetry.dev-dependencies]
-pytest = "^8.0.0"
+pytest = "^8.4.2"
 
 [build-system]
 requires = ["poetry-core>=1.7.0"]

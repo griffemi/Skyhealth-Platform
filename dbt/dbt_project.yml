@@ -1,4 +1,4 @@
-name: 'skyfeed'
+name: 'skyhealth'
 version: '1.0'
 config-version: 2
 profile: 'default'
@@ -7,5 +7,5 @@ macro-paths: ['macros']
 seed-paths: ['seeds']
 
 models:
-  skyfeed:
+  skyhealth:
     +materialized: view

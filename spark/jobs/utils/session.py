@@ -1,9 +1,9 @@
 from pyspark.sql import SparkSession
 
-from skyfeed.config import settings
+from skyhealth.config import settings
 
 
-def get_spark(app_name: str = "skyfeed", warehouse_uri: str | None = None) -> SparkSession:
+def get_spark(app_name: str = "skyhealth", warehouse_uri: str | None = None) -> SparkSession:
     warehouse = warehouse_uri or settings.warehouse_uri
     builder = (
         SparkSession.builder.appName(app_name)

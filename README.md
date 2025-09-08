@@ -1,6 +1,6 @@
-# Skyfeed
+# Skyhealth
 
-Skyfeed ingests weather data, builds daily climate features, and exposes analytics through dbt and Streamlit/Lightdash.
+Skyhealth monitors local climate change by ingesting weather data, deriving daily climate indicators, and surfacing analytics through dbt and Streamlit/Lightdash.
 
 ```
 API -> Bronze (Iceberg/Hadoop) -> Silver (Spark features) -> Gold (dbt) -> Lightdash/Streamlit
@@ -14,7 +14,7 @@ Using the Iceberg Hadoop catalog keeps metadata in the GCS bucket alongside data
 4. Migrate existing tables with Iceberg's `snapshot` procedure.
 
 ## Development Quickstart
-Prereqs: Docker, Poetry.
+Prereqs: Docker, Poetry, Python 3.13.
 
 ```bash
 cp .env.example .env

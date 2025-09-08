@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     parquet_export: str | None = None
     dbt_duckdb: str = "./lake/dev.duckdb"
     bq_project: str | None = None
-    bq_dataset: str = "skyfeed_gold"
+    bq_dataset: str = "skyhealth_gold"
     spark_master_url: str = "spark://spark-master:7077"
     spark_master_rest_url: str = "http://spark-master:6066"
     spark_master_ui_url: str = "http://spark-master:8080"

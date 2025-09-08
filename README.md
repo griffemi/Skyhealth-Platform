@@ -1,33 +1,25 @@
 # Skyhealth Platform
 
-*A pragmatic, personal weather & climate data platform built to be boring‑reliable and recruiter‑readable.*
+Skyhealth monitors local climate change by ingesting weather data, deriving daily climate indicators, and surfacing analytics through dbt and Streamlit/Lightdash. Skyhealth is built to be a *portable weather & climate data platform—built GCP‑first, designed to migrate cleanly to other cloud providers.*
 
 ---
 
-## The Story (why this exists)
+## The Story (why I’m building this)
 
-Hi, I’m Emi. I’ve spent the last few years building data platforms that actually ship. Skyhealth is me putting those habits into a clean, end‑to‑end weather/climate project: something I’d trust to run for a small team, that I can extend quickly, and that showcases how I work (design for reliability first, then scale).
+I’m Emi, and weather is personal for me. I’m heat‑sensitive (autism related), and rain has always been this small, magical reset—calming, vivid, and grounding. Skyhealth is my way to put numbers and structure around that experience: **track the conditions that affect me right now** and **show how those conditions will change over the next 50 years**. 
 
-I’m moving toward Seattle, and I care a lot about day‑to‑day decisions that depend on weather—commuting, power usage, air quality, flood risk, and “can we do this outdoor plan without getting soaked.” Skyhealth makes that data accessible, testable, and eventually predictive, starting pragmatic and growing intentionally.
-
-If you’re a recruiter or hiring manager skimming this: this repo shows my approach to platform work—clear contracts, CI that protects production, sensible data modeling, and a roadmap that reduces scope risk while increasing business value.
+This project blends two things I care about: boring‑reliable engineering and meaningful signals. I want a system that **I** would trust day‑to‑day (“Is today going to knock my energy out?” “Do I get my rain walk?”) and that’s honest about uncertainty when peeking into the future. The build is intentionally straightforward, expandable, and transparent—so anyone can follow the shape of it without reading the entire codebase.
 
 ---
 
 ## BLUF (Bottom Line Up Front)
 
-- **Purpose:** unified, testable pipelines for North American weather & climate data, with readable models and a simple dashboard.
-- **Principles:** boring‑reliable infra; data contracts; test‑before‑prod; incremental delivery.
-- **What’s here:** ingestion scaffolding, modeling patterns, validation hooks, and a minimal analytics UI pattern.
-- **Roadmap highlights:** full North America coverage, **precipitation rates**, and **predictions** (nowcasting + short‑term).
+- **Purpose:** End‑to‑end pipelines for North American weather & climate data with clear models, quality gates, precipitation rates, and baseline predictions (nowcasting/short‑term).
+- **Principles:** boring‑reliable infra; explicit data contracts; **test comprehensively before prod**; incremental delivery; portability by design.
+- **Cloud:** **GCP by default** (GCS + BigQuery + Cloud Run). Abstractions keep migration to AWS/Azure straightforward.
+- **Roadmap (short):** North America coverage → precipitation rates → predictions → simple API/UI for access.
 
----
-
-## Issue → Solution → Why
-
-- **Issue:** Weather data is fragmented, schema‑inconsistent, and hard to trust across sources and regions.
-- **Solution:** A repeatable pipeline with clear layers (ingest → model → validate → serve) and CI that rejects bad changes before production.
-- **Why it works:** Consistent contracts + automated checks reduce surprise in prod and keep iteration fast without sacrificing safety.
+> Acronyms I use: **E2E** (end‑to‑end), **PR** (pull request), **CI** (continuous integration), **IaC** (infrastructure as code).
 
 ---
 
@@ -36,142 +28,216 @@ If you’re a recruiter or hiring manager skimming this: this repo shows my appr
 - **Branches**
   - `feature/*`: active development
   - `dev`: integration and validation
-  - `prod`: **production**
+  - `prod`: production
 
 - **Deployment trigger**
-  - **Merging to `prod` is production deployment.** That’s the contract.
-  - Before opening a PR to `prod`, **test comprehensively** (see “Testing & Quality Gates”).
+  - **Merging to `prod` is deployment.** Treat `prod` as sacred.
 
 - **Expectations before merging to `prod`**
-  1. All unit and integration tests pass locally.
-  2. Data validation gates (schema + basic quality checks) pass on a representative sample.
-  3. A smoke run completes end‑to‑end on `dev` (ingest → model → UI/API).
-  4. The PR includes a short “risk & rollback” note.
+  1. Unit + integration tests pass locally and in CI.
+  2. Data validation gates (schema + quality thresholds) pass on a representative sample.
+  3. A smoke E2E run on `dev` completes (ingest → model → validate → serve).
+  4. PR includes a short “risk & rollback” note.
 
-> TL;DR: treat `prod` as sacred. If it merges, it ships.
-
----
-
-## High‑level Architecture (implementation‑agnostic)
-
-- **Ingest (Bronze):** fetch and land raw weather feeds (HTTP/CSV/Parquet/JSON). Immutable storage, partitioned by date/source.
-- **Model (Silver/Gold):** normalize units/timezones, harmonize schemas, derive precipitation rates, build tidy tables for analysis.
-- **Validate:** schema + expectation checks; sample‑based and rolling window checks.
-- **Serve:** simple analytics UI and/or API for retrieval (maps, time series, summaries).
-
-This design is cloud‑agnostic and intentionally “boring.” It can back onto local files/DuckDB for development and a warehouse (e.g., BigQuery/Snowflake/Redshift) for production.
-
----
-
-## Getting Started (local)
-
-Prereqs (any equivalent tooling is fine):
-- Python 3.11+ (I use 3.13), `pipx` or `poetry`
-- Docker (optional but recommended for local services)
-- `make` (quality‑of‑life for common tasks)
-
-Common flows:
-```bash
-# 1) Setup
-make init         # or: poetry install
-
-# 2) Run a local data pull (example; see Makefile/ops docs if present)
-make ingest-sample
-
-# 3) Build models
-make models       # e.g., run transforms / notebooks / dbt models if configured
-
-# 4) Validate
-make validate     # run data quality checks
-
-# 5) Launch demo UI (if available)
-make ui
-```
-
-> If your environment differs, adapt the commands—this repo is designed to be portable.
-
----
-
-## Testing & Quality Gates
-
-- **Unit tests:** core transforms, utilities, schema conversions (`pytest`).
-- **Integration tests:** end‑to‑end sample flow: ingest → model → serve.
-- **Data validation:** schema checks + basic quality thresholds (e.g., null %, range checks, station counts). 
-- **Smoke test:** minimal end‑to‑end run on `dev` before any `prod` PR.
-- **CI (recommended):** run tests + validations on every PR; block `prod` merges on failures.
-
-> Acronyms I use: **CI** (Continuous Integration), **PR** (Pull Request), **E2E** (End‑to‑End).
-
----
-
-## Data & Domains
-
-- **Core domains:** observations, forecasts, and derived metrics (e.g., precipitation rates).
-- **Regions:** North America first (U.S., Canada, Mexico) with consistent spatial joins and timezones.
-- **Units:** explicit unit conversions (SI/imperial) with clear metadata.
-
-> Data providers may include national weather services and open/public datasets. Exact sources are documented per connector in the code/config as they’re added.
+> TL;DR—if it merges to `prod`, it ships. Be comprehensive before that point.
 
 ---
 
 ## Roadmap
 
-The roadmap is ordered to deliver value early while keeping risk low. Checkboxes indicate intent/milestones.
+The plan delivers value early while keeping scope safe. Ops, cost, and scale work are **embedded throughout** (no separate phase).
 
 ### Phase 0 — MVP foundations
-- [x] Repo and platform scaffolding (layers, contracts, make targets)
+- [x] Repo scaffolding (layers, contracts, Makefile)
 - [x] Sample ingestion + example model + validation hooks
 - [x] Minimal UI pattern for exploration (map/time‑series friendly)
 
 ### Phase 1 — North America coverage
 - [ ] Expand connectors for U.S., Canada, Mexico observations
-- [ ] Normalize station metadata + timezone handling
-- [ ] Regionally aware partitioning + retention policy
+- [ ] Normalize station metadata + timezones + unit conversions
+- [ ] Partitioning + retention strategy suitable for low cost
 
 ### Phase 1.1 — Precipitation rates
 - [ ] Derive precipitation rates from raw observations
-- [ ] Rolling window quality checks (spikes, dropouts)
-- [ ] Exposure in models and UI/API
+- [ ] Rolling‑window quality checks (spikes, dropouts, stale sensors)
+- [ ] Exposure in models and API/UI
 
 ### Phase 2 — Predictions (nowcasting + short‑term)
-- [ ] Integrate forecast feeds and/or lightweight nowcasting
-- [ ] Backtesting harness and error metrics (MAE/RMSE, by region)
+- [ ] Integrate forecast feeds and/or simple nowcasting baselines
+- [ ] Backtesting harness and error metrics (MAE/RMSE by region)
 - [ ] Feature store pattern for reusable signals
 
 ### Phase 3 — Access & UX
-- [ ] Simple read‑only API for programmatic access
+- [ ] Read‑only API for programmatic access
 - [ ] Dashboard: map + time‑series + region drill‑downs
-- [ ] Basic auth/API keys + usage limits
+- [ ] Auth keys + thoughtful rate limits
 
+> “Ops/cost/scale as we go”: scheduled runs with retries, lifecycle rules, incremental processing, and caching are layered into each phase, not deferred.
 
-Predictions are intentionally scoped after solid coverage + precipitation—modeling is only useful if the data is consistently trustworthy.
+---
+
+## Architecture at a glance
+
+**Flow:** `Ingest (Bronze) → Model (Silver/Gold) → Validate → Serve (API/UI)`
+
+- **Ingest (Bronze):** Land raw feeds intact. Immutable storage, partitioned by date/source. 
+- **Model (Silver):** Normalize units/timezones, harmonize schemas, geospatial joins.
+- **Model (Gold):** Derive **precipitation rates** and region/day summaries for fast access.
+- **Validate:** Contracts (schema/expectations) and rolling quality checks.
+- **Serve:** Read‑only API for data access + simple UI for maps and time series.
+
+**Default runtime:** GCP (GCS, BigQuery, Cloud Run) with local‑first dev (DuckDB + Docker). Components are replaceable to keep migration low‑friction.
+
+---
+
+## Components & Technology Choices (what and why)
+
+> This section is intentionally detailed—**purpose first**, then the tech. Where I name tools, I also name a portable alternative.
+
+### Ingestion
+- **What:** Pull weather/climate observations and forecasts from public providers; store **raw** unchanged (CSV/JSON/Parquet).
+- **Why:** Raw, immutable landings give auditability and simpler reprocessing.
+- **Default tech (GCP‑first):** Python workers on Cloud Run (or Jobs) writing to **GCS**; retries with backoff; signed requests as needed.
+- **Local dev:** Dockerized workers writing to a local folder; make targets for sample pulls.
+- **Portable:** Swap GCS → S3/Azure Blob; Cloud Run → ECS/Fargate/Azure Container Apps. 
+
+### Storage & Lake
+- **What:** Partitioned object storage for raw/processed data; columnar formats.
+- **Why:** Cheap, fast scans and easy incremental processing.
+- **Default:** **GCS** with **Parquet**, partitioned by `ingest_date`, `region`, `source`.
+- **Optional:** Table format like **Apache Iceberg** for ACID and time travel if/when needed.
+- **Portable:** S3 or Azure Blob with the same layout.
+
+### Transform & Modeling
+- **What:** Turn raw observations into tidy, query‑ready tables and **precipitation rates**, then into curated region/day summaries.
+- **Why:** Clear separation of concerns; stable interfaces for consumers.
+- **Default:** 
+  - **dbt Core** for SQL models (Silver/Gold) on **BigQuery** (with **BigQuery GIS** for geospatial ops).
+  - Lightweight Python transforms for edge cases (e.g., **xarray** for gridded data, **pandas** for reshaping).
+- **Local dev:** **DuckDB** (with spatial) targets for fast iteration.
+- **Portable:** dbt adapters exist for Snowflake/Redshift/Postgres; Python stays the same.
+
+### Orchestration
+- **What:** Define and schedule E2E runs, retries, and asset dependencies.
+- **Why:** Reproducibility and observability of the full graph.
+- **Default:** **Dagster** (Dockerized locally; deployed via Cloud Run or a small VM).
+- **Portable:** Prefect or Airflow can substitute with minimal graph changes.
+
+### Data Validation & Contracts
+- **What:** Schema/expectation checks on load + rolling quality guards (null %, range, station counts, spikes).
+- **Why:** Catch drift early; protect `prod` from silent breaks.
+- **Default:** **dbt tests** + **Great Expectations** (or pydantic contracts in Python) gated in CI and `dev` runs.
+- **Portable:** Same tools run on any warehouse; assertions live next to code.
+
+### Serving (API & UI)
+- **What:** Read‑only API for programmatic access; simple UI for maps and time series.
+- **Why:** Fast, honest answers—“what’s happening here?” and “how is it trending?”
+- **Default:** 
+  - **FastAPI** on Cloud Run (rate‑limited).
+  - **Streamlit** UI with **Leaflet/Folium** or deck.gl for maps; time‑series plots.
+  - Optionally **Lightdash** for BI explorers over dbt models.
+- **Portable:** Any container platform; map libs are frontend‑agnostic.
+
+### Predictions (nowcasting + short‑term)
+- **What:** Baseline models (persistence, simple regressors) with backtesting; later, more capable nowcasting.
+- **Why:** Start honest and interpretable, measure errors, then iterate.
+- **Default:** **scikit‑learn**/**statsmodels**/**xarray** with a backtesting harness; metrics: **MAE/RMSE** by region/season.
+- **Portable:** All Python; storage/compute abstractions isolate cloud specifics.
+
+### Observability, Cost, and Reliability (baked in)
+- **Logs/metrics:** Structured logs; basic metrics and alerting on failures/stale data (Cloud Monitoring). 
+- **Cost controls:** GCS lifecycle rules, partition pruning, query quotas, and incremental models.
+- **Resilience:** Exponential backoff, idempotent writers, small batch sizes, and dead‑letter queues if volume warrants.
+- **Security:** Least‑privilege service accounts, per‑environment secrets, and narrow egress rules.
+
+### Portability Map (at a glance)
+- GCS ↔ S3 ↔ Azure Blob
+- BigQuery ↔ Snowflake/Redshift/Postgres/DuckDB
+- Cloud Run ↔ ECS/Fargate ↔ Azure Container Apps
+- Cloud Scheduler ↔ EventBridge ↔ Azure Scheduler
+- Cloud Monitoring ↔ CloudWatch ↔ Azure Monitor
+
+---
+
+## Data Model (layers)
+
+- **Bronze (raw):** exact payloads + producer metadata; partitioned; checksums; never mutated.
+- **Silver (normalized):** typed columns, unit/timezone normalization, harmonized station metadata, geospatial joins.
+- **Gold (serving):** 
+  - `precipitation_rate_*` tables (by station/region/time).
+  - `region_day_summary` (temp ranges, humidity, wind, precipitation totals/rates).
+  - Indices/materializations tuned for API/UI access.
+
+> Contracts: every table has documented schemas, units, and assumptions. Changes are versioned and tested.
+
+---
+
+## Testing & Quality Gates
+
+- **Unit tests:** transforms, utilities, schema conversions.
+- **Integration tests:** ingest → model → validate on sample slices.
+- **Data validation:** schema expectations + rolling quality thresholds.
+- **Smoke E2E:** one green run on `dev` before any `prod` PR.
+- **CI:** runs tests/validations on every PR; blocks `prod` merges on failures.
+
+---
+
+## Getting Started (local)
+
+Prereqs (use equivalents if you prefer):
+- Python 3.13, `pipx` or `poetry`
+- Docker (helpful for API/UI and services)
+- `make` for common tasks
+
+Common flows:
+```bash
+# 1) Setup
+make init           # or: poetry install
+
+# 2) Pull a small sample
+make ingest-sample
+
+# 3) Build models (Silver/Gold)
+make models
+
+# 4) Validate data
+make validate
+
+# 5) Run API and/or UI locally
+make api
+make ui
+```
+
+> Local targets default to DuckDB/file‑based paths; cloud targets switch to GCP configs.
+
+---
+
+## Environments & Branching (quick reference)
+
+- `feature/*` → `dev` → `prod`
+- **Merge to `prod` = deploy.** Comprehensive tests/validations and a short risk/rollback note are required.
+- Secrets, permissions, and configs are per‑environment with least privilege.
 
 ---
 
 ## Contributing (PR checklist)
 
 Before opening a PR—especially into `prod`:
-- [ ] Tests pass (`pytest -q`) and coverage didn’t drop on critical paths
+- [ ] Tests pass and critical coverage didn’t drop
 - [ ] Data validation passes on a representative sample
 - [ ] E2E smoke run is green on `dev`
-- [ ] Short “risk & rollback” notes included in the PR description
-- [ ] If changing schemas, update the contracts/docs
-
----
-
-## FAQ
-
-- **Can I run this without cloud credits?** Yes—dev runs locally; production is cloud‑agnostic.
-- **What happens on merge to `prod`?** Deployment happens. That’s the rule—tests and validations must be green before that point.
+- [ ] Short “risk & rollback” notes included in PR
+- [ ] Contracts/docs updated if a schema changed
 
 ---
 
 ## License
 
-TBD — permissive open‑source license intended. If you have constraints, open an issue and we’ll align.
+TBD — permissive open‑source license intended. Open an issue if you have constraints and we’ll align.
 
 ---
 
-## Contact
+## Notes
 
-If you’re evaluating me for a Data Platform / Analytics Engineering role, this repo is designed to be read quickly at the top, with pragmatic engineering choices reflected throughout. Happy to walk through trade‑offs and roadmap sequencing on a call.
+- Built GCP‑first (GCS, BigQuery, Cloud Run), but **portable by design**—component choices above include equivalents.
+- Long‑horizon climate context (50‑year framing) informs modeling choices and data retention; the platform stays honest about uncertainty and keeps versioned assumptions visible.

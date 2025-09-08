@@ -1,0 +1,37 @@
+---
+- name: download spark
+  get_url:
+    url: "https://archive.apache.org/dist/spark/spark-{{ spark_version }}/spark-{{ spark_version }}-bin-hadoop3.tgz"
+    dest: /tmp/spark.tgz
+- name: extract spark
+  unarchive:
+    src: /tmp/spark.tgz
+    dest: /opt/
+    remote_src: yes
+- name: symlink spark
+  file:
+    src: /opt/spark-{{ spark_version }}-bin-hadoop3
+    dest: /opt/spark
+    state: link
+- name: install master service
+  copy:
+    dest: /etc/systemd/system/spark-master.service
+    content: |
+      [Unit]
+      Description=Spark Master
+      After=network.target
+
+      [Service]
+      Type=simple
+      User={{ ansible_user }}
+      ExecStart=/opt/spark/sbin/start-master.sh --host 0.0.0.0 --port 7077 --webui-port 8080 --properties-file /opt/spark/conf/spark-defaults.conf
+      ExecStop=/opt/spark/sbin/stop-master.sh
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+- name: start master
+  systemd:
+    name: spark-master
+    state: started
+    enabled: yes

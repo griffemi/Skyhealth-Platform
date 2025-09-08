@@ -1,0 +1,3 @@
+---
+ansible_user: ubuntu
+spark_version: 3.5.0

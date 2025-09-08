@@ -1,0 +1,37 @@
+---
+- name: download spark
+  get_url:
+    url: "https://archive.apache.org/dist/spark/spark-{{ spark_version }}/spark-{{ spark_version }}-bin-hadoop3.tgz"
+    dest: /tmp/spark.tgz
+- name: extract spark
+  unarchive:
+    src: /tmp/spark.tgz
+    dest: /opt/
+    remote_src: yes
+- name: symlink spark
+  file:
+    src: /opt/spark-{{ spark_version }}-bin-hadoop3
+    dest: /opt/spark
+    state: link
+- name: install worker service
+  copy:
+    dest: /etc/systemd/system/spark-worker.service
+    content: |
+      [Unit]
+      Description=Spark Worker
+      After=network.target
+
+      [Service]
+      Type=simple
+      User={{ ansible_user }}
+      ExecStart=/opt/spark/sbin/start-worker.sh spark://{{ hostvars['spark-master'].ansible_host }}:7077
+      ExecStop=/opt/spark/sbin/stop-worker.sh
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+- name: start worker
+  systemd:
+    name: spark-worker
+    state: started
+    enabled: yes

@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "skyfeed"
+version = "0.1.0"
+description = "Weather ETL platform"
+authors = ["Skyfeed <engineering@skyfeed.local>"]
+packages = [{include = "spark"}, {include = "apps"}, {include = "skyfeed"}]
+
+[tool.poetry.dependencies]
+python = "^3.13"
+pyspark = "^3.5.0"
+pyiceberg = "^0.6.0"
+streamlit = "^1.33.0"
+folium = "^0.15.1"
+dbt-duckdb = "^1.6.0"
+dbt-bigquery = "^1.6.0"
+google-cloud-storage = "^2.14.0"
+google-cloud-compute = "^1.13.0"
+pydantic = "^2.6.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^8.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.7.0"]
+build-backend = "poetry.core.masonry.api"

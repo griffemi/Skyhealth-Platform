@@ -1,0 +1,13 @@
+---
+- name: update apt
+  apt:
+    update_cache: yes
+- name: install base packages
+  apt:
+    name:
+      - curl
+      - python3
+      - openjdk-17-jdk
+      - docker.io
+      - docker-compose
+    state: present

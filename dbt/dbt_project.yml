@@ -1,0 +1,11 @@
+name: 'skyfeed'
+version: '1.0'
+config-version: 2
+profile: 'default'
+model-paths: ['models']
+macro-paths: ['macros']
+seed-paths: ['seeds']
+
+models:
+  skyfeed:
+    +materialized: view

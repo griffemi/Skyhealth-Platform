@@ -1,0 +1,29 @@
+name: Deploy Prod
+on:
+  push:
+    branches: ['prod']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Build images
+        run: |
+          echo "build submitter, dbt builder, streamlit, lightdash"
+      - name: Terraform apply
+        run: echo "terraform apply"
+      - name: Ansible deploy
+        run: echo "ansible deploy"
+      - name: Update Cloud Run Jobs
+        run: echo "update jobs"
+      - name: Smoke test
+        run: |
+          gcloud run jobs execute spark-submitter --region $REGION --wait \
+            --set-env-vars DRY_RUN=1,WORKER_PRESCALE=1,MODE=silver
+          gcloud run jobs execute dbt-builder --region $REGION --wait
+          curl -f $STREAMLIT_URL
+          curl -f $LIGHTDASH_URL

@@ -1,0 +1,9 @@
+version: 2
+models:
+  - name: climate_silver_daily_features
+    description: "Silver daily weather features"
+    columns:
+      - name: location_id
+        tests: [not_null]
+      - name: d
+        tests: [not_null]

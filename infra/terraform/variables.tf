@@ -1,8 +1,8 @@
 variable "project_id" {}
 variable "region" { default = "us-central1" }
 variable "zone" { default = "us-central1-a" }
-variable "bucket_name" { default = "skyfeed-lake" }
-variable "dataset_name" { default = "skyfeed_gold" }
+variable "bucket_name" { default = "skyhealth-lake" }
+variable "dataset_name" { default = "skyhealth_gold" }
 
 variable "submitter_image" { default = "" }
 variable "dbt_image" { default = "" }

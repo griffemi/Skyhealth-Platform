@@ -1,6 +1,6 @@
 import subprocess
 
-from skyfeed.config import settings
+from skyhealth.config import settings
 
 
 def main():

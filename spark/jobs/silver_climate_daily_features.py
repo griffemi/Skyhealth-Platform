@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pyspark.sql import functions as F
 
-from skyfeed.config import export_path
+from skyhealth.config import export_path
 from spark.jobs.utils.cli import base_parser
 from spark.jobs.utils.log import configure
 from spark.jobs.utils.session import get_spark

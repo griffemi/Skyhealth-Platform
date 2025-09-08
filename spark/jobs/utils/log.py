@@ -1,5 +1,5 @@
 import logging
-from skyfeed.config import settings
+from skyhealth.config import settings
 
 
 def configure():

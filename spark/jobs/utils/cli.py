@@ -1,5 +1,5 @@
 import argparse
-from skyfeed.config import settings
+from skyhealth.config import settings
 
 def base_parser(description: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=description)

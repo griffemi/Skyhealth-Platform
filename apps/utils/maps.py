@@ -2,7 +2,7 @@ import pandas as pd
 import duckdb
 import folium
 from folium.plugins import TimestampedGeoJson
-from skyfeed.config import settings, export_path
+from skyhealth.config import settings, export_path
 
 DB_PATH = settings.dbt_duckdb
 LOCATIONS_CSV = 'data/locations.csv'

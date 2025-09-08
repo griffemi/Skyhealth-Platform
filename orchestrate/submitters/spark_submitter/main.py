@@ -5,7 +5,7 @@ import time
 import requests
 from google.cloud import compute_v1
 
-from skyfeed.config import settings
+from skyhealth.config import settings
 
 
 def _metadata_token() -> str:
@@ -54,7 +54,7 @@ def _wait_for_workers(target: int, timeout_sec: int, poll_sec: int) -> None:
 def _build_spark_props() -> dict:
     props = {
         "spark.master": settings.spark_master_url,
-        "spark.app.name": "skyfeed-job",
+        "spark.app.name": "skyhealth-job",
         "spark.executor.cores": settings.spark_executor_cores,
         "spark.executor.memory": settings.spark_executor_memory,
         "spark.task.maxFailures": settings.spark_task_max_failures,
@@ -78,7 +78,7 @@ def _submit(app: str, args: list[str]) -> str:
     payload = {
         "action": "CreateSubmissionRequest",
         "appResource": app,
-        "clientSparkVersion": "3.5.0",
+        "clientSparkVersion": "4.0.1",
         "mainClass": "org.apache.spark.deploy.SparkSubmit",
         "appArgs": args,
         "sparkProperties": _build_spark_props(),

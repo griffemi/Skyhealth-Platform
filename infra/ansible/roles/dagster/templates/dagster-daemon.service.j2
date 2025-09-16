@@ -1,0 +1,22 @@
+[Unit]
+Description=Dagster daemon
+After=dagster-webserver.service
+Requires=cloud-sql-proxy.service
+
+[Service]
+Type=simple
+PermissionsStartOnly=true
+User={{ dagster_user }}
+Group={{ dagster_group }}
+WorkingDirectory={{ dagster_app_dir }}
+EnvironmentFile={{ dagster_env_dir }}/dagster.env
+Environment=PATH=/home/{{ dagster_user }}/.local/bin:/usr/local/bin:/usr/bin
+ExecStartPre=/usr/local/bin/skyhealth-render-env
+ExecStart=/bin/bash -lc 'poetry run dagster-daemon run'
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

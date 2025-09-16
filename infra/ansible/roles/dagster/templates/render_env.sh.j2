@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SECRET_ID="{{ dagster_sql_secret }}"
+TARGET_FILE="{{ dagster_env_dir }}/dagster.env"
+TMP_FILE="$(mktemp)"
+trap 'rm -f "${TMP_FILE}"' EXIT
+
+PG_PASSWORD=$(gcloud secrets versions access latest --secret="${SECRET_ID}")
+UI_SECRET=$(cat {{ dagster_ui_secret_path }})
+
+cat >"${TMP_FILE}" <<ENVVARS
+DAGSTER_HOME={{ dagster_home }}
+DAGSTER_PGHOST=127.0.0.1
+DAGSTER_PGPORT={{ dagster_sql_proxy_port }}
+DAGSTER_PGDATABASE=dagster
+DAGSTER_PGUSER=dagster
+DAGSTER_PGPASSWORD=${PG_PASSWORD}
+DAGSTER_UI_SECRET_KEY=${UI_SECRET}
+GOOGLE_CLOUD_PROJECT={{ gcp_project }}
+SKYHEALTH_ENV={{ dagster_env }}
+PYTHONPATH={{ dagster_app_dir }}
+ENVVARS
+{% for key, value in dagster_extra_env.items() %
+echo "{{ key }}={{ value }}" >>"${TMP_FILE}"
+{% endfor %}
+
+install -o {{ dagster_user }} -g {{ dagster_group }} -m 0640 "${TMP_FILE}" "${TARGET_FILE}"

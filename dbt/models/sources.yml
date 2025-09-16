@@ -1,6 +1,0 @@
-version: 2
-sources:
-  - name: silver
-    tables:
-      - name: climate_silver_daily_features
-        external: true

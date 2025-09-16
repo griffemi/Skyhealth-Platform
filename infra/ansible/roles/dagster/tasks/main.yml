@@ -1,0 +1,180 @@
+---
+- name: ensure required Dagster variables are provided
+  ansible.builtin.assert:
+    that:
+      - dagster_sql_instance | length > 0
+      - dagster_sql_secret | length > 0
+      - gcp_project | length > 0
+    fail_msg: "Set dagster_sql_instance, dagster_sql_secret, and gcp_project before applying the Dagster role."
+
+- name: create dagster group
+  ansible.builtin.group:
+    name: "{{ dagster_group }}"
+    system: true
+
+- name: create dagster user
+  ansible.builtin.user:
+    name: "{{ dagster_user }}"
+    group: "{{ dagster_group }}"
+    shell: /bin/bash
+    create_home: true
+    system: true
+
+- name: create runtime directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(dagster_user) }}"
+    group: "{{ item.group | default(dagster_group) }}"
+    mode: "{{ item.mode | default('0750') }}"
+  loop:
+    - { path: "{{ dagster_app_dir }}", mode: "0755" }
+    - { path: "{{ dagster_home }}" }
+    - { path: "{{ dagster_run_dir }}" }
+    - { path: "{{ dagster_logs_dir }}" }
+    - { path: "{{ dagster_logs_dir }}/compute" }
+    - { path: "{{ dagster_env_dir }}", owner: root, group: {{ dagster_group }}, mode: "0750" }
+
+- name: ensure pipx home for dagster user
+  ansible.builtin.file:
+    path: "/home/{{ dagster_user }}/.local"
+    state: directory
+    owner: "{{ dagster_user }}"
+    group: "{{ dagster_group }}"
+    mode: "0755"
+
+- name: install Poetry with pipx for dagster user
+  ansible.builtin.command: >-
+    pipx install poetry {{ '--pip-args="--pre"' if dagster_poetry_preview else '' }}
+  become: true
+  become_user: "{{ dagster_user }}"
+  environment:
+    PIPX_BIN_DIR: "/home/{{ dagster_user }}/.local/bin"
+    PIPX_HOME: "/home/{{ dagster_user }}/.local/pipx"
+  args:
+    creates: "{{ dagster_poetry_bin }}"
+
+- name: expose poetry globally
+  ansible.builtin.file:
+    src: "{{ dagster_poetry_bin }}"
+    dest: /usr/local/bin/poetry
+    state: link
+
+- name: install google cloud apt gpg key
+  ansible.builtin.get_url:
+    url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+    dest: /usr/share/keyrings/cloud.google.gpg
+    mode: "0644"
+
+- name: add google cloud sdk repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main"
+    filename: google-cloud-sdk
+    state: present
+
+- name: install google cloud sdk
+  ansible.builtin.apt:
+    name: google-cloud-cli
+    state: present
+    update_cache: yes
+
+- name: ensure ops agent repository configured
+  ansible.builtin.shell: |
+    set -o errexit -o nounset -o pipefail
+    curl -sS https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh | bash -s -- --also-install
+  args:
+    creates: /etc/google-cloud-ops-agent/config.yaml
+
+- name: install/upgrade google cloud ops agent
+  ansible.builtin.apt:
+    name: google-cloud-ops-agent
+    state: latest
+
+- name: deploy ops agent config
+  ansible.builtin.template:
+    src: ops-agent.yaml.j2
+    dest: /etc/google-cloud-ops-agent/config.yaml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart ops agent
+
+- name: download cloud sql auth proxy
+  ansible.builtin.get_url:
+    url: "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v{{ cloud_sql_proxy_version }}/cloud-sql-proxy.linux.amd64"
+    dest: /usr/local/bin/cloud-sql-proxy
+    mode: "0755"
+
+- name: ensure dagster ui secret exists
+  ansible.builtin.command: >-
+    bash -c "umask 027 && [ -f {{ dagster_ui_secret_path }} ] || tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 64 > {{ dagster_ui_secret_path }}"
+  args:
+    creates: "{{ dagster_ui_secret_path }}"
+
+- name: set permissions on dagster ui secret
+  ansible.builtin.file:
+    path: "{{ dagster_ui_secret_path }}"
+    owner: root
+    group: {{ dagster_group }}
+    mode: '0640'
+
+- name: template dagster configuration
+  ansible.builtin.template:
+    src: dagster.yaml.j2
+    dest: "{{ dagster_home }}/dagster.yaml"
+    owner: "{{ dagster_user }}"
+    group: "{{ dagster_group }}"
+    mode: "0640"
+
+- name: template dagster workspace
+  ansible.builtin.template:
+    src: workspace.yaml.j2
+    dest: "{{ dagster_home }}/workspace.yaml"
+    owner: "{{ dagster_user }}"
+    group: "{{ dagster_group }}"
+    mode: "0640"
+
+- name: install env rendering helper
+  ansible.builtin.template:
+    src: render_env.sh.j2
+    dest: /usr/local/bin/skyhealth-render-env
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: install cloud sql proxy service
+  ansible.builtin.template:
+    src: cloud-sql-proxy.service.j2
+    dest: /etc/systemd/system/cloud-sql-proxy.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload systemd
+
+- name: install dagster webserver service
+  ansible.builtin.template:
+    src: dagster-webserver.service.j2
+    dest: /etc/systemd/system/dagster-webserver.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload systemd
+
+- name: install dagster daemon service
+  ansible.builtin.template:
+    src: dagster-daemon.service.j2
+    dest: /etc/systemd/system/dagster-daemon.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload systemd
+
+- name: ensure services enabled
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - cloud-sql-proxy.service
+    - dagster-webserver.service
+    - dagster-daemon.service

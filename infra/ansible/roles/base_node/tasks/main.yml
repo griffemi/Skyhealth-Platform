@@ -1,13 +1,36 @@
 ---
-- name: update apt
-  apt:
+- name: ensure apt cache is fresh
+  ansible.builtin.apt:
     update_cache: yes
-- name: install base packages
-  apt:
+    cache_valid_time: 3600
+
+- name: upgrade base packages
+  ansible.builtin.apt:
+    upgrade: dist
+
+- name: install baseline packages
+  ansible.builtin.apt:
     name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - python3-dev
+      - build-essential
+      - git
       - curl
-      - python3.13
-      - openjdk-17-jdk
-      - docker.io
-      - docker-compose
+      - unzip
+      - jq
+      - pipx
+      - libssl-dev
+      - libffi-dev
+      - pkg-config
+      - ca-certificates
+      - apt-transport-https
+      - fail2ban
     state: present
+
+- name: ensure fail2ban service is enabled
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true

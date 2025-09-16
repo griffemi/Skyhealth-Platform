@@ -9,3 +9,4 @@ dbt/logs/
 *.egg-info/
 .DS_Store
 
+great_expectations/uncommitted/

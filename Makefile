@@ -1,50 +1,62 @@
-.PHONY: init up down spark-bronze-batch spark-bronze-incremental spark-silver dbt-dev map map-timeslider test tf-init tf-plan tf-apply tf-destroy ansible-deploy ar-build-push
+.PHONY: init lint fmt test dagster-dev dagster-materialize spark-bronze spark-silver spark-gold publish-bq pipeline-dev streamlit-dev delta-housekeeping nuke-pave validation-snapshots
 .RECIPEPREFIX := >
 
+DATE ?= $(shell date -I)
+PARTITION ?= $(DATE)
+
 init:
->poetry install
+>poetry install --no-root
 
-up:
->docker-compose up -d
+lint:
+>poetry run ruff check .
 
-down:
->docker-compose down
+fmt:
+>poetry run black .
 
-spark-bronze-batch:
->poetry run python spark/jobs/bronze_openmeteo.py --mode backfill --range-start 1970-01-01
+test:
+>poetry run pytest -q
 
-spark-bronze-incremental:
->poetry run python spark/jobs/bronze_openmeteo.py --mode incremental
+ci: lint fmt test
+
+spark-bronze:
+>poetry run python spark/jobs/bronze_openmeteo.py --mode backfill --range-start $(PARTITION) --range-end $(PARTITION)
 
 spark-silver:
->poetry run python spark/jobs/silver_climate_daily_features.py
+>poetry run python spark/jobs/silver_climate_daily_features.py --date $(PARTITION)
 
-dbt-dev:
->poetry run dbt --project-dir dbt --profiles-dir dbt build
+spark-gold:
+>poetry run python spark/jobs/gold_climate_daily_summary.py --date $(PARTITION)
 
-map:
->poetry run streamlit run apps/climate_map.py
+publish-bq:
+>poetry run python -m skyhealth.publish_bigquery --date $(PARTITION)
 
-map-timeslider:
->poetry run streamlit run apps/climate_map_timeslider.py
+pipeline-dev:
+>$(MAKE) spark-bronze PARTITION=$(PARTITION)
+>$(MAKE) spark-silver PARTITION=$(PARTITION)
+>$(MAKE) spark-gold PARTITION=$(PARTITION)
+>$(MAKE) publish-bq PARTITION=$(PARTITION)
 
-tf-init:
->cd infra/terraform && terraform init
+streamlit-dev:
+>poetry run streamlit run apps/streamlit_app.py
 
-tf-plan:
->cd infra/terraform && terraform plan
+dagster-dev:
+>poetry run dagster dev -m skyhealth.orchestration.definitions
 
-tf-apply:
->cd infra/terraform && terraform apply -auto-approve
+dagster-materialize:
+>poetry run dagster asset materialize --select bronze_openmeteo_daily+publish_gold_to_bigquery --partition $(PARTITION)
 
-tf-destroy:
->cd infra/terraform && terraform destroy -auto-approve
+delta-housekeeping:
+>poetry run dagster asset materialize --select delta_housekeeping
 
-ansible-deploy:
->ansible-playbook -i infra/ansible/inventories/production/hosts.ini infra/ansible/site.yml
+validation-snapshots:
+>python -c "from skyhealth.config import settings; print(settings.ge_data_docs_path)"
 
-ar-build-push:
->docker build -t spark_submitter -f orchestrate/submitters/spark_submitter/Dockerfile .
->docker build -t dbt_builder -f orchestrate/submitters/dbt_builder/Dockerfile .
->docker build -t streamlit_app -f docker/streamlit.Dockerfile .
->docker build -t lightdash_app -f docker/lightdash.Dockerfile .
+nuke-pave:
+>@read -p "This will DELETE local lake data. Type 'DELETE' to continue: " CONFIRM; \
+>  if [ "$$CONFIRM" = "DELETE" ]; then \
+>    rm -rf lake/checkpoints lake/exports lake/bronze lake/silver lake/gold lake/warehouse; \
+>    mkdir -p lake/{bronze,silver,gold,checkpoints,exports}; \
+>    echo "Lake reset complete."; \
+>  else \
+>    echo "Aborted."; \
+>  fi

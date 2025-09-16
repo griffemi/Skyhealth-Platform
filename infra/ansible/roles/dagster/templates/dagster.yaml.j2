@@ -1,0 +1,52 @@
+run_storage:
+  module: dagster_postgres.run_storage
+  class: DagsterPostgresRunStorage
+  config:
+    postgres_db:
+      username:
+        env: DAGSTER_PGUSER
+      password:
+        env: DAGSTER_PGPASSWORD
+      hostname:
+        env: DAGSTER_PGHOST
+      db_name:
+        env: DAGSTER_PGDATABASE
+      port:
+        env: DAGSTER_PGPORT
+schedule_storage:
+  module: dagster_postgres.schedule_storage
+  class: DagsterPostgresScheduleStorage
+  config:
+    postgres_db:
+      username:
+        env: DAGSTER_PGUSER
+      password:
+        env: DAGSTER_PGPASSWORD
+      hostname:
+        env: DAGSTER_PGHOST
+      db_name:
+        env: DAGSTER_PGDATABASE
+      port:
+        env: DAGSTER_PGPORT
+event_log_storage:
+  module: dagster_postgres.event_log
+  class: DagsterPostgresEventLogStorage
+  config:
+    postgres_db:
+      username:
+        env: DAGSTER_PGUSER
+      password:
+        env: DAGSTER_PGPASSWORD
+      hostname:
+        env: DAGSTER_PGHOST
+      db_name:
+        env: DAGSTER_PGDATABASE
+      port:
+        env: DAGSTER_PGPORT
+compute_logs:
+  module: dagster._core.storage.compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir: "{{ dagster_logs_dir }}/compute"
+telemetry:
+  enabled: false

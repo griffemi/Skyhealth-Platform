@@ -1,0 +1,23 @@
+logging:
+  receivers:
+    dagster-journald:
+      type: systemd_journald
+      include_units:
+        - dagster-webserver.service
+        - dagster-daemon.service
+        - cloud-sql-proxy.service
+  service:
+    pipelines:
+      dagster-logs:
+        receivers:
+          - dagster-journald
+metrics:
+  receivers:
+    host-metrics:
+      type: hostmetrics
+      collection_interval: 60s
+  service:
+    pipelines:
+      default:
+        receivers:
+          - host-metrics

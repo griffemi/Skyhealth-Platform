@@ -1,66 +1,159 @@
 # Skyhealth Platform
 
-Skyhealth monitors local climate change by ingesting weather data, deriving daily climate indicators, and surfacing analytics through dbt and Streamlit/Lightdash. Skyhealth is built to be a *portable weather & climate data platform—built GCP‑first, designed to migrate cleanly to other cloud providers.*
+Skyhealth delivers a daily Bronze → Silver → Gold weather lake on Google Cloud: Dagster orchestrates Spark jobs on a hardened GCE VM, Delta tables live in GCS, lightweight pandas contracts guard quality, BigQuery serves the curated gold tables, and Streamlit (Cloud Run) turns them into dashboards.
 
 ---
 
-## The Story (why I’m building this)
+## Quick Tour
 
-I’m Emi, and weather is personal for me. I’m heat‑sensitive (autism related), and rain has always been this small, magical reset—calming, vivid, and grounding. Skyhealth is my way to put numbers and structure around that experience: **track the conditions that affect me right now** and **show how those conditions will change over the next 50 years**. 
-
-This project blends two things I care about: boring‑reliable engineering and meaningful signals. I want a system that **I** would trust day‑to‑day (“Is today going to knock my energy out?” “Do I get my rain walk?”) and that’s honest about uncertainty when peeking into the future. The build is intentionally straightforward, expandable, and transparent—so anyone can follow the shape of it without reading the entire codebase.
-
----
-
-## BLUF (Bottom Line Up Front)
-
-- **Purpose:** End‑to‑end pipelines for North American weather & climate data with clear models, quality gates, precipitation rates, and baseline predictions (nowcasting/short‑term).
-- **Principles:** boring‑reliable infra; explicit data contracts; **test comprehensively before prod**; incremental delivery; portability by design.
-- **Cloud:** **GCP by default** (GCS + BigQuery + Cloud Run). Abstractions keep migration to AWS/Azure straightforward.
-- **Roadmap (short):** North America coverage → precipitation rates → predictions → simple API/UI for access.
-
-> Acronyms I use: **E2E** (end‑to‑end), **PR** (pull request), **CI** (continuous integration), **IaC** (infrastructure as code).
+- **Control plane:** Dagster runs on a single GCE instance (systemd services for webserver + daemon, backed by Cloud SQL Postgres, logs shipped via Ops Agent).
+- **Compute:** Spark is local-only for development; production batches are expected to run on Dataproc Serverless.
+- **Lake:** GCS buckets hold Delta tables for Bronze, Silver, and Gold. Lifecycle policies age data to cheaper storage.
+- **Quality:** Simple Pandas-based validations run on Silver and Gold partitions, writing quick HTML snapshots to `great_expectations/uncommitted/data_docs`.
+- **Serving:** Gold partitions publish into BigQuery (`climate_daily_summary`). Streamlit reads directly from BigQuery and is deployed to Cloud Run using Workload Identity.
 
 ---
 
-## Environments & Deployment Policy
+## Getting Started Locally
 
-- **Branches**
-  - `feature/*`: active development
-  - `dev`: integration and validation
-  - `prod`: production
+1. Install dependencies: `make init` (requires Python 3.13).
+2. Run the Dagster UI: `make dagster-dev`
+3. Materialize a dev partition end-to-end: `make pipeline-dev PARTITION=2024-07-01`
+4. Explore the dashboard locally: `make streamlit-dev`
 
-- **Deployment trigger**
-  - **Merging to `prod` is deployment.** Treat `prod` as sacred.
+`make` contains one-shot helpers (Spark for individual layers, Dagster materializations, BigQuery publish, etc.). Refer to [Task Reference](#task-reference).
 
-- **Expectations before merging to `prod`**
-  1. Unit + integration tests pass locally and in CI.
-  2. Data validation gates (schema + quality thresholds) pass on a representative sample.
-  3. A smoke E2E run on `dev` completes (ingest → model → validate → serve).
-  4. PR includes a short “risk & rollback” note.
+---
 
-> TL;DR—if it merges to `prod`, it ships. Be comprehensive before that point.
+## Environments & Naming
+
+| Environment | Example Project Resources | Notes |
+|-------------|---------------------------|-------|
+| **dev**     | `gs://<project>-dev-bronze`, `skyhealth_dev_gold` dataset | Local Spark, Dataproc optional |
+| **stg**     | `gs://<project>-stg-bronze`, `skyhealth_stg_gold` dataset | Pre-prod validation |
+| **prod**    | `gs://<project>-prod-bronze`, `skyhealth_prod_gold` dataset | Dagster VM + Dataproc Serverless + Cloud Run |
+
+Buckets are `gs://<project>-<env>-{bronze,silver,gold,checkpoints}` with uniform access and lifecycle rules (Bronze → Nearline after 60d, Silver after 120d, Gold retained 365d). BigQuery datasets mirror the env suffix.
+
+---
+
+## Orchestration Path
+
+Dagster defines daily-partitioned assets:
+
+1. **`bronze_openmeteo_daily`** – fetches Open-Meteo observations, lands Delta partition in Bronze.
+2. **`silver_climate_daily_features`** – derives heating/cooling degree days, precipitation flags, and validates with Pandas contracts.
+3. **`gold_climate_daily_summary`** – aggregates per-region metrics, runs contract checks, then publishes.
+4. **`publish_gold_to_bigquery`** – loads the partition into BigQuery (time-partitioned, clustered on `region_id`).
+5. **`delta_housekeeping`** – weekly VACUUM for Bronze/Silver/Gold tables.
+
+A daily schedule (`daily_delta_schedule`, 03:00 UTC) materializes Bronze→Gold→Publish. A sensor checks for missing Bronze partitions (older than 24h) and triggers a catch-up run. Weekly housekeeping runs every Monday at 06:00 UTC.
+
+---
+
+## Lake Layout & Retention
+
+- **Bronze** (`openmeteo_daily`): partitioned by `ingest_date`; raw API response with location metadata.
+- **Silver** (`climate_daily_features`): same partitioning with derived features (`hdd18`, `cdd18`, `gdd10_30`, precipitation flag). Pandas checks: non-null IDs/dates, plausible temperature/precip ranges.
+- **Gold** (`climate_daily_summary`): aggregated per `region_id` (currently maps to station) with 7/30 day precipitation windows computed by Streamlit queries. Contract checks ensure non-null region/date and precipitation ≥ 0.
+
+Delta data docs render under `great_expectations/uncommitted/data_docs/{suite}/<partition>.html`.
+
+---
+
+## Deploy Flow
+
+1. **Terraform (`infra/terraform`)** provisions network, Dagster VM, Cloud SQL, GCS buckets, BigQuery datasets, Streamlit Cloud Run service, IAM alerts, and budget policy. Run with `terraform plan` → `terraform apply`.
+2. **Ansible (`infra/ansible`)** hardens the Dagster VM (updates + fail2ban), installs Poetry, Google Cloud SDK, Cloud SQL proxy, and lays down systemd units (`dagster-webserver`, `dagster-daemon`, `cloud-sql-proxy`).
+3. **Dataproc**: production Spark runs should submit to Dataproc Serverless (staging bucket + service accounts managed by Terraform). Local dev continues to use `spark-submit` via Poetry.
+4. **Streamlit**: container built from `docker/streamlit.Dockerfile`, deployed via `gcloud run deploy` with Workload Identity (`STREAMLIT_SERVICE_ACCOUNT`).
+
+The GitHub Actions workflow `deploy_prod.yml` wires these steps together (Terraform plan/apply, Ansible playbook, Cloud Build submit, Cloud Run deploy) using GCP service-account credentials.
+
+---
+
+## Security Notes
+
+- Service accounts: Dagster VM (`dagster-runner`), Dataproc batches (`spark-runner`), and Streamlit (`streamlit-svc`) run without downloaded keys. Workload Identity is enforced for Cloud Run and Dataproc.
+- OS Login is enabled on the Dagster VM; firewalls only allow IAP ranges on SSH/port 3000.
+- Secrets (Cloud SQL password, Dagster UI secret) live in Secret Manager and are pulled on-demand via `skyhealth-render-env`.
+
+---
+
+## Troubleshooting
+
+- **Dagster**: `systemctl status dagster-webserver dagster-daemon`, `journalctl -u dagster-daemon -f`. In Cloud Logging use `resource.type="gce_instance" AND textPayload:"dagster"`.
+- **Spark/Delta**: inspect partitions with `gsutil ls gs://<bucket>/climate_daily_summary/`. For Dataproc batches, `gcloud dataproc batches list --region=$REGION` and `describe` for driver output.
+- **BigQuery**: check latest partition –
+  ```sql
+  SELECT MAX(observation_date)
+  FROM `<project>.<dataset>.climate_daily_summary`;
+  ```
+- **Streamlit**: verify deployment via `gcloud run services describe <service> --region=$REGION --format='value(status.url)'`; logs stream to `resource.type="cloud_run_revision"`.
+
+
+---
+
+## Task Reference
+
+| Command | Purpose |
+|---------|---------|
+| `make pipeline-dev PARTITION=YYYY-MM-DD` | Bronze → Silver → Gold → BigQuery for the given date |
+| `make spark-bronze PARTITION=...` | Run only the Bronze ingestion job |
+| `make spark-silver PARTITION=...` | Build Silver features for a date |
+| `make spark-gold PARTITION=...` | Build Gold summary for a date |
+| `make publish-bq PARTITION=...` | Re-publish a Gold partition to BigQuery |
+| `make dagster-materialize PARTITION=...` | Materialize via Dagster (`bronze_openmeteo_daily+publish_gold_to_bigquery`) |
+| `make delta-housekeeping` | Trigger Delta VACUUM asset |
+| `make validation-snapshots` | Print the folder storing validation HTML snapshots |
+| `make streamlit-dev` | Run Streamlit against local BigQuery credentials |
+| `make nuke-pave` | Interactive *DELETE* of local lake directories |
+
+---
+
+## Nuke & Pave
+
+`make nuke-pave` prompts for `DELETE` before clearing `lake/{bronze,silver,gold,checkpoints,exports,warehouse}`—use this before rebuilding local Delta tables. Production wipe must be a manual, multi-step process (confirm with stakeholders before running destructive GCS deletes).
+
+---
+
+## CI/CD
+
+- `.github/workflows/ci.yml`: Poetry install → Ruff → Black → Pytest on every PR.
+- `.github/workflows/deploy_prod.yml`: Terraform init/plan/apply, Ansible playbook, Cloud Build + Cloud Run deploy, smoke curl of Streamlit.
+
+Protected branches should require CI green; `prod` pushes trigger full infra + app rollout.
+
+---
+
+## Glossary
+
+- **BQ** – BigQuery
+- **ADR** – Architecture Decision Record
+- **IaC** – Infrastructure as Code
+- **SLO** – Service-Level Objective
+
+---
 
 ---
 
 ## Roadmap
 
-The plan delivers value early while keeping scope safe. Ops, cost, and scale work are **embedded throughout** (no separate phase).
-
-### Phase 0 — MVP foundations
+### Phase 0 — Foundations
 - [x] Repo scaffolding (layers, contracts, Makefile)
 - [x] Sample ingestion + example model + validation hooks
 - [x] Minimal UI pattern for exploration (map/time‑series friendly)
 
-### Phase 1 — North America coverage
+### Phase 1 — Version 1 Build
+- [x] Determine best fitting architecture pattern
 - [ ] Expand connectors for U.S., Canada, Mexico observations
 - [ ] Normalize station metadata + timezones + unit conversions
 - [ ] Partitioning + retention strategy suitable for low cost
+- [ ] Exposure in models and API/UI
 
 ### Phase 1.1 — Precipitation rates
 - [ ] Derive precipitation rates from raw observations
 - [ ] Rolling‑window quality checks (spikes, dropouts, stale sensors)
-- [ ] Exposure in models and API/UI
 
 ### Phase 2 — Predictions (nowcasting + short‑term)
 - [ ] Integrate forecast feeds and/or simple nowcasting baselines
@@ -74,170 +167,3 @@ The plan delivers value early while keeping scope safe. Ops, cost, and scale wor
 
 > “Ops/cost/scale as we go”: scheduled runs with retries, lifecycle rules, incremental processing, and caching are layered into each phase, not deferred.
 
----
-
-## Architecture at a glance
-
-**Flow:** `Ingest (Bronze) → Model (Silver/Gold) → Validate → Serve (API/UI)`
-
-- **Ingest (Bronze):** Land raw feeds intact. Immutable storage, partitioned by date/source. 
-- **Model (Silver):** Normalize units/timezones, harmonize schemas, geospatial joins.
-- **Model (Gold):** Derive **precipitation rates** and region/day summaries for fast access.
-- **Validate:** Contracts (schema/expectations) and rolling quality checks.
-- **Serve:** Read‑only API for data access + simple UI for maps and time series.
-
-**Default runtime:** GCP (GCS, BigQuery, Cloud Run) with local‑first dev (DuckDB + Docker). Components are replaceable to keep migration low‑friction.
-
----
-
-## Components & Technology Choices (what and why)
-
-> This section is intentionally detailed—**purpose first**, then the tech. Where I name tools, I also name a portable alternative.
-
-### Ingestion
-- **What:** Pull weather/climate observations and forecasts from public providers; store **raw** unchanged (CSV/JSON/Parquet).
-- **Why:** Raw, immutable landings give auditability and simpler reprocessing.
-- **Default tech (GCP‑first):** Python workers on Cloud Run (or Jobs) writing to **GCS**; retries with backoff; signed requests as needed.
-- **Local dev:** Dockerized workers writing to a local folder; make targets for sample pulls.
-- **Portable:** Swap GCS → S3/Azure Blob; Cloud Run → ECS/Fargate/Azure Container Apps. 
-
-### Storage & Lake
-- **What:** Partitioned object storage for raw/processed data; columnar formats.
-- **Why:** Cheap, fast scans and easy incremental processing.
-- **Default:** **GCS** with **Parquet**, partitioned by `ingest_date`, `region`, `source`.
-- **Optional:** Table format like **Apache Iceberg** for ACID and time travel if/when needed.
-- **Portable:** S3 or Azure Blob with the same layout.
-
-### Transform & Modeling
-- **What:** Turn raw observations into tidy, query‑ready tables and **precipitation rates**, then into curated region/day summaries.
-- **Why:** Clear separation of concerns; stable interfaces for consumers.
-- **Default:** 
-  - **dbt Core** for SQL models (Silver/Gold) on **BigQuery** (with **BigQuery GIS** for geospatial ops).
-  - Lightweight Python transforms for edge cases (e.g., **xarray** for gridded data, **pandas** for reshaping).
-- **Local dev:** **DuckDB** (with spatial) targets for fast iteration.
-- **Portable:** dbt adapters exist for Snowflake/Redshift/Postgres; Python stays the same.
-
-### Orchestration
-- **What:** Define and schedule E2E runs, retries, and asset dependencies.
-- **Why:** Reproducibility and observability of the full graph.
-- **Default:** **Dagster** (Dockerized locally; deployed via Cloud Run or a small VM).
-- **Portable:** Prefect or Airflow can substitute with minimal graph changes.
-
-### Data Validation & Contracts
-- **What:** Schema/expectation checks on load + rolling quality guards (null %, range, station counts, spikes).
-- **Why:** Catch drift early; protect `prod` from silent breaks.
-- **Default:** **dbt tests** + **Great Expectations** (or pydantic contracts in Python) gated in CI and `dev` runs.
-- **Portable:** Same tools run on any warehouse; assertions live next to code.
-
-### Serving (API & UI)
-- **What:** Read‑only API for programmatic access; simple UI for maps and time series.
-- **Why:** Fast, honest answers—“what’s happening here?” and “how is it trending?”
-- **Default:** 
-  - **FastAPI** on Cloud Run (rate‑limited).
-  - **Streamlit** UI with **Leaflet/Folium** or deck.gl for maps; time‑series plots.
-  - Optionally **Lightdash** for BI explorers over dbt models.
-- **Portable:** Any container platform; map libs are frontend‑agnostic.
-
-### Predictions (nowcasting + short‑term)
-- **What:** Baseline models (persistence, simple regressors) with backtesting; later, more capable nowcasting.
-- **Why:** Start honest and interpretable, measure errors, then iterate.
-- **Default:** **scikit‑learn**/**statsmodels**/**xarray** with a backtesting harness; metrics: **MAE/RMSE** by region/season.
-- **Portable:** All Python; storage/compute abstractions isolate cloud specifics.
-
-### Observability, Cost, and Reliability (baked in)
-- **Logs/metrics:** Structured logs; basic metrics and alerting on failures/stale data (Cloud Monitoring). 
-- **Cost controls:** GCS lifecycle rules, partition pruning, query quotas, and incremental models.
-- **Resilience:** Exponential backoff, idempotent writers, small batch sizes, and dead‑letter queues if volume warrants.
-- **Security:** Least‑privilege service accounts, per‑environment secrets, and narrow egress rules.
-
-### Portability Map (at a glance)
-- GCS ↔ S3 ↔ Azure Blob
-- BigQuery ↔ Snowflake/Redshift/Postgres/DuckDB
-- Cloud Run ↔ ECS/Fargate ↔ Azure Container Apps
-- Cloud Scheduler ↔ EventBridge ↔ Azure Scheduler
-- Cloud Monitoring ↔ CloudWatch ↔ Azure Monitor
-
----
-
-## Data Model (layers)
-
-- **Bronze (raw):** exact payloads + producer metadata; partitioned; checksums; never mutated.
-- **Silver (normalized):** typed columns, unit/timezone normalization, harmonized station metadata, geospatial joins.
-- **Gold (serving):** 
-  - `precipitation_rate_*` tables (by station/region/time).
-  - `region_day_summary` (temp ranges, humidity, wind, precipitation totals/rates).
-  - Indices/materializations tuned for API/UI access.
-
-> Contracts: every table has documented schemas, units, and assumptions. Changes are versioned and tested.
-
----
-
-## Testing & Quality Gates
-
-- **Unit tests:** transforms, utilities, schema conversions.
-- **Integration tests:** ingest → model → validate on sample slices.
-- **Data validation:** schema expectations + rolling quality thresholds.
-- **Smoke E2E:** one green run on `dev` before any `prod` PR.
-- **CI:** runs tests/validations on every PR; blocks `prod` merges on failures.
-
----
-
-## Getting Started (local)
-
-Prereqs (use equivalents if you prefer):
-- Python 3.13, `pipx` or `poetry`
-- Docker (helpful for API/UI and services)
-- `make` for common tasks
-
-Common flows:
-```bash
-# 1) Setup
-make init           # or: poetry install
-
-# 2) Pull a small sample
-make ingest-sample
-
-# 3) Build models (Silver/Gold)
-make models
-
-# 4) Validate data
-make validate
-
-# 5) Run API and/or UI locally
-make api
-make ui
-```
-
-> Local targets default to DuckDB/file‑based paths; cloud targets switch to GCP configs.
-
----
-
-## Environments & Branching (quick reference)
-
-- `feature/*` → `dev` → `prod`
-- **Merge to `prod` = deploy.** Comprehensive tests/validations and a short risk/rollback note are required.
-- Secrets, permissions, and configs are per‑environment with least privilege.
-
----
-
-## Contributing (PR checklist)
-
-Before opening a PR—especially into `prod`:
-- [ ] Tests pass and critical coverage didn’t drop
-- [ ] Data validation passes on a representative sample
-- [ ] E2E smoke run is green on `dev`
-- [ ] Short “risk & rollback” notes included in PR
-- [ ] Contracts/docs updated if a schema changed
-
----
-
-## License
-
-TBD — permissive open‑source license intended. Open an issue if you have constraints and we’ll align.
-
----
-
-## Notes
-
-- Built GCP‑first (GCS, BigQuery, Cloud Run), but **portable by design**—component choices above include equivalents.
-- Long‑horizon climate context (50‑year framing) informs modeling choices and data retention; the platform stays honest about uncertainty and keeps versioned assumptions visible.

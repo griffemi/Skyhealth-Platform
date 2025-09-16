@@ -1,0 +1,18 @@
+[Unit]
+Description=Cloud SQL Auth Proxy for Dagster metadata
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ dagster_user }}
+Group={{ dagster_group }}
+ExecStart=/usr/local/bin/cloud-sql-proxy {{ dagster_sql_instance }} \
+  --address 127.0.0.1 \
+  --port {{ dagster_sql_proxy_port }} \
+  --structured-logs
+Restart=always
+RestartSec=5
+Environment=GOOGLE_CLOUD_PROJECT={{ gcp_project }}
+
+[Install]
+WantedBy=multi-user.target

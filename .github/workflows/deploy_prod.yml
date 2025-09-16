@@ -1,29 +1,73 @@
 name: Deploy Prod
+
 on:
   push:
-    branches: ['prod']
+    branches: ["prod"]
+
+env:
+  TF_WORKING_DIR: infra/terraform
+  ANSIBLE_INVENTORY: infra/ansible/inventories/production/hosts.ini
+  DAGSTER_PLAYBOOK: infra/ansible/site.yml
+  STREAMLIT_DOCKERFILE: docker/streamlit.Dockerfile
+  STREAMLIT_IMAGE: gcr.io/${{ secrets.GCP_PROJECT }}/streamlit:${{ github.sha }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
         with:
-          python-version: '3.11'
-      - name: Build images
-        run: |
-          echo "build submitter, dbt builder, streamlit, lightdash"
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT }}
+          install_components: gke-gcloud-auth-plugin
+
+      - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan
+
       - name: Terraform apply
-        run: echo "terraform apply"
-      - name: Ansible deploy
-        run: echo "ansible deploy"
-      - name: Update Cloud Run Jobs
-        run: echo "update jobs"
-      - name: Smoke test
+        if: github.ref == 'refs/heads/prod'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve
+
+      - name: Install Ansible
         run: |
-          gcloud run jobs execute spark-submitter --region $REGION --wait \
-            --set-env-vars DRY_RUN=1,WORKER_PRESCALE=1,MODE=silver
-          gcloud run jobs execute dbt-builder --region $REGION --wait
-          curl -f $STREAMLIT_URL
-          curl -f $LIGHTDASH_URL
+          python -m pip install --upgrade pip
+          pip install ansible google-auth google-auth[gcp]
+
+      - name: Apply Dagster VM configuration
+        run: |
+          ansible-playbook -i $ANSIBLE_INVENTORY $DAGSTER_PLAYBOOK
+
+      - name: Build Streamlit container
+        run: |
+          gcloud builds submit --tag $STREAMLIT_IMAGE --gcs-log-dir=gs://${{ secrets.GCP_BUILD_BUCKET }}/logs --gcs-source-staging-dir=gs://${{ secrets.GCP_BUILD_BUCKET }}/sources --file $STREAMLIT_DOCKERFILE .
+
+      - name: Deploy Streamlit Cloud Run service
+        run: |
+          gcloud run deploy ${{ secrets.STREAMLIT_SERVICE_NAME }} \
+            --image $STREAMLIT_IMAGE \
+            --region ${{ secrets.GCP_REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --service-account ${{ secrets.STREAMLIT_SERVICE_ACCOUNT }}
+
+      - name: Smoke test Streamlit
+        run: |
+          curl --fail --retry 5 --retry-delay 5 ${{ secrets.STREAMLIT_URL }}

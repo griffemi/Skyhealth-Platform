@@ -1,15 +1,6 @@
 ---
-- hosts: all
+- hosts: dagster
   become: yes
   roles:
     - base_node
-
-- hosts: spark-master
-  become: yes
-  roles:
-    - spark_master
-
-- hosts: spark-workers
-  become: yes
-  roles:
-    - spark_worker
+    - dagster

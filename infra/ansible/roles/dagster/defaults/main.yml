@@ -1,0 +1,20 @@
+---
+dagster_user: dagster
+dagster_group: dagster
+dagster_app_dir: /opt/skyhealth/app
+dagster_home: /opt/skyhealth/dagster_home
+dagster_run_dir: /var/lib/skyhealth
+dagster_logs_dir: /var/log/dagster
+dagster_env_dir: /etc/skyhealth
+dagster_env: dev
+dagster_sql_proxy_port: 6432
+dagster_sql_instance: ""
+dagster_sql_secret: ""
+dagster_ui_secret_path: /etc/skyhealth/dagster_ui_secret
+dagster_poetry_bin: "/home/{{ dagster_user }}/.local/bin/poetry"
+dagster_extra_env: {}
+dagster_poetry_preview: false
+gcp_project: ""
+cloud_sql_proxy_version: 2.11.3
+dagster_python_path: /usr/bin/python3
+dagster_ops_agent_config: roles/dagster/templates/ops-agent.yaml.j2

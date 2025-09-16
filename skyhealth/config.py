@@ -1,56 +1,67 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
+
 from pydantic import BaseSettings
 
 
 class Settings(BaseSettings):
-    warehouse_uri: str = "./lake/warehouse"
-    checkpoint_dir: str = "./lake/checkpoints"
-    parquet_export: str | None = None
-    dbt_duckdb: str = "./lake/dev.duckdb"
-    bq_project: str | None = None
-    bq_dataset: str = "skyhealth_gold"
-    spark_master_url: str = "spark://spark-master:7077"
-    spark_master_rest_url: str = "http://spark-master:6066"
-    spark_master_ui_url: str = "http://spark-master:8080"
-    worker_project: str | None = None
-    worker_zone: str = "us-central1-a"
-    worker_mig_name: str | None = None
-    worker_prescale: int = 3
-    worker_postscale: int = 0
-    worker_ready_target: int | None = None
-    worker_register_timeout_sec: int = 600
-    worker_register_poll_sec: int = 5
+    env: str = "dev"
+    region: str = "us-central1"
+    project_id: str | None = None
+    bronze_bucket: str | None = None
+    silver_bucket: str | None = None
+    gold_bucket: str | None = None
+    checkpoints_bucket: str | None = None
+    local_lake_root: str = "./lake"
+    delta_exports_dir: str | None = None
+    use_dataproc: bool = False
+    dataproc_region: str = "us-central1"
+    dataproc_temp_bucket: str | None = None
+    dataproc_service_account: str | None = None
+    dataproc_subnet: str | None = None
     spark_executor_cores: str = "2"
     spark_executor_memory: str = "4g"
-    spark_task_max_failures: str = "4"
-    spark_dra_enable: int = 1
-    spark_shuffle_tracking_enable: int = 1
-    spark_exec_min: int = 0
-    spark_exec_init: int = 1
-    spark_exec_max: int = 2
-    poll_interval_sec: int = 10
-    job_max_duration_sec: int = 7200
-    dry_run: int = 0
-    master_project: str | None = None
-    master_zone: str = "us-central1-a"
-    master_instance_name: str = "spark-master"
-    master_start_timeout_sec: int = 300
-    master_stop_timeout_sec: int = 300
-    keep_master_after: int = 0
+    bigquery_project: str | None = None
+    bigquery_dataset: str = "skyhealth_dev_gold"
+    duckdb_path: str = "./lake/dev.duckdb"
+    ge_data_docs_path: str = "./great_expectations/uncommitted/data_docs/local_site"
+    dagster_home: str = "./.dagster"
+    locations_file: str = "data/locations.csv"
     log_level: str = "INFO"
-    dbt_target: str = "prod"
-    mode: str = "silver"
 
     class Config:
         env_file = ".env"
 
+    def bucket_uri(self, layer: str) -> str:
+        bucket_attr = f"{layer}_bucket"
+        bucket = getattr(self, bucket_attr, None)
+        if bucket:
+            return bucket
+        root = Path(self.local_lake_root).resolve()
+        return root.joinpath(layer).as_uri()
 
-settings = Settings()
+    def delta_table_uri(self, layer: str, table: str) -> str:
+        base = self.bucket_uri(layer)
+        if base.startswith("file://"):
+            return f"{base}/{table}"
+        return f"{base}/{table}"
+
+    def checkpoints_uri(self) -> str:
+        if self.checkpoints_bucket:
+            return self.checkpoints_bucket
+        return str(Path(self.local_lake_root).resolve().joinpath("checkpoints").as_uri())
+
+    def export_path(self, table: str) -> str:
+        if self.delta_exports_dir:
+            return str(Path(self.delta_exports_dir) / table)
+        return str(Path(self.local_lake_root) / "exports" / table)
 
 
-def export_path(table: str) -> str:
-    if settings.parquet_export:
-        return settings.parquet_export
-    return str(Path(settings.warehouse_uri) / "exports" / table)
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

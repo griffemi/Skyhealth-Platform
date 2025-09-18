@@ -21,6 +21,7 @@
       - unzip
       - jq
       - pipx
+      - openjdk-17-jre-headless
       - libssl-dev
       - libffi-dev
       - pkg-config

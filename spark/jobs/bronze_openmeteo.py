@@ -18,12 +18,12 @@ from pyspark.sql.types import (
 
 from skyhealth.config import settings
 from spark.jobs.utils.cli import base_parser
-from spark.jobs.utils.io import merge_delta_table
+from spark.jobs.utils.io import merge_iceberg_table
 from spark.jobs.utils.log import configure
 from spark.jobs.utils.session import get_spark
 
 API_URL = "https://api.open-meteo.com/v1/forecast"
-BRONZE_TABLE = settings.delta_table_uri("bronze", "openmeteo_daily")
+BRONZE_TABLE = settings.iceberg_table_identifier("bronze", "openmeteo_daily")
 
 SCHEMA = StructType(
     [
@@ -138,7 +138,7 @@ def materialize_dates(
         if not rows:
             continue
         df = spark.createDataFrame(rows, schema=SCHEMA)
-        merge_delta_table(
+        merge_iceberg_table(
             spark,
             df,
             BRONZE_TABLE,
@@ -172,7 +172,7 @@ def main() -> None:
     args = parser.parse_args()
 
     locations = load_locations(args.location_set)
-    spark = get_spark("bronze_openmeteo", warehouse_uri=settings.bucket_uri("bronze"))
+    spark = get_spark("bronze_openmeteo")
 
     if args.mode == "backfill":
         if not args.range_start:

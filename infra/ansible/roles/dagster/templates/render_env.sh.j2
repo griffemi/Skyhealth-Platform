@@ -21,6 +21,17 @@ GOOGLE_CLOUD_PROJECT={{ gcp_project }}
 SKYHEALTH_ENV={{ dagster_env }}
 PYTHONPATH={{ dagster_app_dir }}
 ENVVARS
+
+if command -v java >/dev/null 2>&1; then
+  JAVA_HOME_PATH="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
+  echo "JAVA_HOME=${JAVA_HOME_PATH}" >>"${TMP_FILE}"
+fi
+{% if dagster_iceberg_catalog %}
+echo "ICEBERG_CATALOG={{ dagster_iceberg_catalog }}" >>"${TMP_FILE}"
+{% endif %}
+{% if dagster_iceberg_warehouse_uri %}
+echo "ICEBERG_WAREHOUSE_URI={{ dagster_iceberg_warehouse_uri }}" >>"${TMP_FILE}"
+{% endif %}
 {% for key, value in dagster_extra_env.items() %
 echo "{{ key }}={{ value }}" >>"${TMP_FILE}"
 {% endfor %}

@@ -8,3 +8,4 @@ dagster_sql_proxy_port: 6432
 dagster_sql_instance: ""
 dagster_sql_secret: ""
 gcp_project: ""
+dagster_iceberg_warehouse_uri: ""

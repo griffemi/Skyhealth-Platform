@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import date, timedelta
+from datetime import datetime, timezone
 
 from dagster import (
     AssetExecutionContext,
@@ -23,9 +24,13 @@ from spark.jobs import bronze_openmeteo, gold_climate_daily_summary, silver_clim
 from spark.jobs.utils.session import get_spark
 
 PARTITIONS = DailyPartitionsDefinition(start_date=date(2024, 1, 1))
-BRONZE_TABLE = settings.delta_table_uri("bronze", "openmeteo_daily")
-SILVER_TABLE = settings.delta_table_uri("silver", "climate_daily_features")
-GOLD_TABLE = settings.delta_table_uri("gold", "climate_daily_summary")
+BRONZE_TABLE = settings.iceberg_table_identifier("bronze", "openmeteo_daily")
+SILVER_TABLE = settings.iceberg_table_identifier("silver", "climate_daily_features")
+GOLD_TABLE = settings.iceberg_table_identifier("gold", "climate_daily_summary")
+
+BRONZE_NAME = settings.iceberg_table_name("bronze", "openmeteo_daily")
+SILVER_NAME = settings.iceberg_table_name("silver", "climate_daily_features")
+GOLD_NAME = settings.iceberg_table_name("gold", "climate_daily_summary")
 
 
 def _partition_key(context: AssetExecutionContext) -> date:
@@ -36,8 +41,8 @@ def _partition_key(context: AssetExecutionContext) -> date:
 
 @contextmanager
 def spark_session(app_name: str, layer: str | None = None):
-    warehouse = settings.bucket_uri(layer) if layer else settings.local_lake_root
-    spark = get_spark(app_name, warehouse_uri=warehouse)
+    # Layer retained for backwards compatibility; Iceberg uses a shared warehouse.
+    spark = get_spark(app_name)
     try:
         yield spark
     finally:
@@ -81,13 +86,24 @@ def publish_gold_to_bigquery(context: AssetExecutionContext) -> None:
         publish_gold_partition(spark, target_date)
 
 
-@asset(name="delta_housekeeping", compute_kind="spark", description="Vacuum Delta tables to manage retention.")
-def delta_housekeeping() -> None:
-    with spark_session("delta_housekeeping") as spark:
-        spark.conf.set("spark.databricks.delta.retentionDurationCheck.enabled", "false")
-        tables = [BRONZE_TABLE, SILVER_TABLE, GOLD_TABLE]
+@asset(
+    name="iceberg_housekeeping",
+    compute_kind="spark",
+    description="Expire Iceberg snapshots and remove orphan files.",
+)
+def iceberg_housekeeping() -> None:
+    with spark_session("iceberg_housekeeping") as spark:
+        catalog = settings.iceberg_catalog
+        horizon = datetime.now(timezone.utc) - timedelta(hours=168)
+        horizon_literal = horizon.strftime("%Y-%m-%d %H:%M:%S")
+        tables = [BRONZE_NAME, SILVER_NAME, GOLD_NAME]
         for table in tables:
-            spark.sql(f"VACUUM delta.`{table}` RETAIN 168 HOURS")
+            spark.sql(
+                f"CALL {catalog}.system.expire_snapshots('{table}', TIMESTAMP '{horizon_literal}')"
+            )
+            spark.sql(
+                f"CALL {catalog}.system.remove_orphan_files('{table}', TIMESTAMP '{horizon_literal}')"
+            )
 
 
 daily_job = define_asset_job(
@@ -102,15 +118,15 @@ daily_job = define_asset_job(
 )
 
 housekeeping_job = define_asset_job(
-    "weekly_housekeeping_job", selection=AssetSelection.assets(delta_housekeeping)
+    "weekly_housekeeping_job", selection=AssetSelection.assets(iceberg_housekeeping)
 )
 
 daily_schedule = build_schedule_from_partitioned_job(
-    job=daily_job, minute=0, hour=3, name="daily_delta_schedule"
+    job=daily_job, minute=0, hour=3, name="daily_iceberg_schedule"
 )
 
 housekeeping_schedule = ScheduleDefinition(
-    name="weekly_delta_housekeeping", cron_schedule="0 6 * * MON", job=housekeeping_job
+    name="weekly_iceberg_housekeeping", cron_schedule="0 6 * * MON", job=housekeeping_job
 )
 
 
@@ -121,8 +137,7 @@ def bronze_partition_sensor(context):
         return
     with spark_session("bronze_sensor", layer="bronze") as spark:
         exists = (
-            spark.read.format("delta")
-            .load(BRONZE_TABLE)
+            spark.read.table(BRONZE_TABLE)
             .where(F.col("observation_date") == F.lit(target_date))
             .limit(1)
             .collect()
@@ -141,7 +156,7 @@ defs = Definitions(
         silver_climate_daily_features_asset,
         gold_climate_daily_summary_asset,
         publish_gold_to_bigquery,
-        delta_housekeeping,
+        iceberg_housekeeping,
     ],
     schedules=[daily_schedule, housekeeping_schedule],
     sensors=[bronze_partition_sensor],

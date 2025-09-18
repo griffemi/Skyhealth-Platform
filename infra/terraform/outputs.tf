@@ -20,6 +20,7 @@ output "lake_buckets" {
     silver      = google_storage_bucket.lake["silver"].name
     gold        = google_storage_bucket.lake["gold"].name
     checkpoints = google_storage_bucket.lake["checkpoints"].name
+    warehouse   = google_storage_bucket.lake["warehouse"].name
   }
 }
 

@@ -1,18 +1,23 @@
-from delta import configure_spark_with_delta_pip
 from pyspark.sql import SparkSession
 
 from skyhealth.config import settings
 
+ICEBERG_PACKAGE = "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0"
+
 
 def get_spark(app_name: str = "skyhealth", warehouse_uri: str | None = None) -> SparkSession:
-    warehouse = warehouse_uri or settings.local_lake_root
+    warehouse = warehouse_uri or settings.iceberg_warehouse()
+    catalog = settings.iceberg_catalog
     builder = (
         SparkSession.builder.appName(app_name)
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+        .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+        .config(f"spark.sql.catalog.{catalog}", "org.apache.iceberg.spark.SparkCatalog")
+        .config(f"spark.sql.catalog.{catalog}.type", "hadoop")
+        .config(f"spark.sql.catalog.{catalog}.warehouse", warehouse)
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
         .config("spark.sql.execution.arrow.pyspark.enabled", "false")
         .config("spark.sql.warehouse.dir", warehouse)
+        .config("spark.jars.packages", ICEBERG_PACKAGE)
     )
     if warehouse.startswith("gs://"):
         builder = builder.config(
@@ -20,4 +25,4 @@ def get_spark(app_name: str = "skyhealth", warehouse_uri: str | None = None) -> 
         ).config(
             "spark.hadoop.google.cloud.auth.service.account.enable", "true"
         )
-    return configure_spark_with_delta_pip(builder).getOrCreate()
+    return builder.getOrCreate()

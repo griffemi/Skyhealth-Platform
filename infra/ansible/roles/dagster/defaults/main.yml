@@ -18,3 +18,5 @@ gcp_project: ""
 cloud_sql_proxy_version: 2.11.3
 dagster_python_path: /usr/bin/python3
 dagster_ops_agent_config: roles/dagster/templates/ops-agent.yaml.j2
+dagster_iceberg_catalog: skyhealth
+dagster_iceberg_warehouse_uri: ""

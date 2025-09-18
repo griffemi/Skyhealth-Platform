@@ -5,48 +5,129 @@ from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
+from google.api_core import exceptions as gexc
+from google.auth import exceptions as auth_exc
 from google.cloud import bigquery
 
-PROJECT_ID = os.environ.get("GCP_PROJECT")
-DATASET = os.environ.get("BQ_DATASET", "skyhealth_dev_gold")
-TABLE_NAME = os.environ.get("BQ_GOLD_TABLE", "climate_daily_summary")
-FULL_TABLE = f"`{PROJECT_ID}.{DATASET}.{TABLE_NAME}`" if PROJECT_ID else f"`{DATASET}.{TABLE_NAME}`"
+from skyhealth.clickhouse_io import ClickHouseError, query_dataframe
+from skyhealth.config import settings
 
-client = bigquery.Client(project=PROJECT_ID) if PROJECT_ID else bigquery.Client()
+IS_PROD = settings.env.lower() == "prod"
+BQ_PROJECT = os.environ.get("GCP_PROJECT") or settings.bigquery_project or settings.project_id
+BQ_DATASET = os.environ.get("BQ_DATASET", settings.bigquery_dataset)
+BQ_TABLE_NAME = os.environ.get("BQ_GOLD_TABLE", "climate_daily_summary")
+CH_TABLE = settings.clickhouse_table_identifier()
+
+
+class DataSourceUnavailable(RuntimeError):
+    """Raised when the configured analytics store cannot be reached."""
+
+
+@st.cache_resource(show_spinner=False)
+def get_bigquery_client() -> bigquery.Client:
+    if not BQ_PROJECT:
+        raise DataSourceUnavailable(
+            "BigQuery project is undefined. Set `GCP_PROJECT`/`BIGQUERY_PROJECT` in prod before launching the dashboard."
+        )
+    try:
+        return bigquery.Client(project=BQ_PROJECT)
+    except (auth_exc.DefaultCredentialsError, auth_exc.RefreshError) as exc:  # pragma: no cover - requires env state
+        raise DataSourceUnavailable(
+            "No Google Cloud credentials available. Run `gcloud auth application-default login` "
+            "or set `GOOGLE_APPLICATION_CREDENTIALS` before launching the dashboard."
+        ) from exc
+
+
+def ensure_bigquery_table(client: bigquery.Client) -> str:
+    dataset_ref = bigquery.DatasetReference(BQ_PROJECT, BQ_DATASET)
+    table_ref = bigquery.TableReference(dataset_ref, BQ_TABLE_NAME)
+    try:
+        client.get_table(table_ref)
+    except gexc.NotFound as exc:
+        raise DataSourceUnavailable(
+            f"BigQuery table `{BQ_PROJECT}.{BQ_DATASET}.{BQ_TABLE_NAME}` is missing. "
+            "Run `make publish-bq` in prod or update `BQ_DATASET`/`BQ_GOLD_TABLE`."
+        ) from exc
+    except gexc.Forbidden as exc:
+        raise DataSourceUnavailable(
+            "Current credentials lack BigQuery permissions. Confirm your account has access to "
+            f"`{BQ_PROJECT}.{BQ_DATASET}` or switch projects via `gcloud config set project`."
+        ) from exc
+    return f"`{BQ_PROJECT}.{BQ_DATASET}.{BQ_TABLE_NAME}`"
+
+
+def run_clickhouse_query(sql: str, parameters: dict[str, object] | None = None) -> pd.DataFrame:
+    try:
+        return query_dataframe(sql, parameters=parameters)
+    except ClickHouseError as exc:
+        raise DataSourceUnavailable(
+            "Unable to query ClickHouse. Ensure the local ClickHouse server is running (for example: "
+            "`docker run -p 8123:8123 clickhouse/clickhouse-server`) and the `clickhouse_*` settings are correct."
+        ) from exc
 
 
 @st.cache_data(ttl=300)
 def load_available_dates(limit: int = 30) -> list[date]:
-    query = f"""
+    if IS_PROD:
+        client = get_bigquery_client()
+        table = ensure_bigquery_table(client)
+        query = f"""
+            SELECT DISTINCT observation_date
+            FROM {table}
+            ORDER BY observation_date DESC
+            LIMIT {int(limit)}
+        """
+        result = client.query(query).result()
+        return [row.observation_date for row in result]
+
+    sql = f"""
         SELECT DISTINCT observation_date
-        FROM {FULL_TABLE}
+        FROM {CH_TABLE}
         ORDER BY observation_date DESC
-        LIMIT {limit}
+        LIMIT {int(limit)}
     """
-    result = client.query(query).result()
-    return [row.observation_date for row in result]
+    df = run_clickhouse_query(sql)
+    return [pd.to_datetime(value).date() for value in df["observation_date"].tolist()]
 
 
 @st.cache_data(ttl=300)
 def load_regions() -> list[str]:
-    query = f"SELECT DISTINCT region_id FROM {FULL_TABLE} ORDER BY region_id"
-    return [row.region_id for row in client.query(query).result()]
+    if IS_PROD:
+        client = get_bigquery_client()
+        table = ensure_bigquery_table(client)
+        query = f"SELECT DISTINCT region_id FROM {table} ORDER BY region_id"
+        return [row.region_id for row in client.query(query).result()]
+
+    sql = f"SELECT DISTINCT region_id FROM {CH_TABLE} ORDER BY region_id"
+    df = run_clickhouse_query(sql)
+    return df["region_id"].astype(str).tolist()
 
 
 @st.cache_data(ttl=300)
 def fetch_region_snapshot(observation_date: date) -> pd.DataFrame:
-    query = f"""
+    if IS_PROD:
+        client = get_bigquery_client()
+        table = ensure_bigquery_table(client)
+        query = f"""
+            SELECT region_id, avg_temp_c, total_prcp_mm, had_precip, avg_hdd18, avg_cdd18
+            FROM {table}
+            WHERE observation_date = @observation_date
+            ORDER BY region_id
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("observation_date", "DATE", observation_date)]
+        )
+        df = client.query(query, job_config=job_config).to_dataframe()
+        df["observation_date"] = observation_date
+        return df
+
+    sql = f"""
         SELECT region_id, avg_temp_c, total_prcp_mm, had_precip, avg_hdd18, avg_cdd18
-        FROM {FULL_TABLE}
-        WHERE observation_date = @observation_date
+        FROM {CH_TABLE}
+        WHERE observation_date = %(observation_date)s
         ORDER BY region_id
     """
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("observation_date", "DATE", observation_date),
-        ]
-    )
-    df = client.query(query, job_config=job_config).to_dataframe()
+    df = run_clickhouse_query(sql, {"observation_date": observation_date})
     df["observation_date"] = observation_date
     return df
 
@@ -55,42 +136,76 @@ def fetch_region_snapshot(observation_date: date) -> pd.DataFrame:
 def fetch_region_history(region_id: str, days: int = 30) -> pd.DataFrame:
     end_date = date.today()
     start_date = end_date - timedelta(days=days)
-    query = f"""
+
+    if IS_PROD:
+        client = get_bigquery_client()
+        table = ensure_bigquery_table(client)
+        query = f"""
+            SELECT observation_date, avg_temp_c, total_prcp_mm, avg_hdd18, avg_cdd18, had_precip
+            FROM {table}
+            WHERE region_id = @region_id AND observation_date BETWEEN @start_date AND @end_date
+            ORDER BY observation_date
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("region_id", "STRING", region_id),
+                bigquery.ScalarQueryParameter("start_date", "DATE", start_date),
+                bigquery.ScalarQueryParameter("end_date", "DATE", end_date),
+            ]
+        )
+        return client.query(query, job_config=job_config).to_dataframe()
+
+    sql = f"""
         SELECT observation_date, avg_temp_c, total_prcp_mm, avg_hdd18, avg_cdd18, had_precip
-        FROM {FULL_TABLE}
-        WHERE region_id = @region_id AND observation_date BETWEEN @start_date AND @end_date
+        FROM {CH_TABLE}
+        WHERE region_id = %(region_id)s AND observation_date BETWEEN %(start_date)s AND %(end_date)s
         ORDER BY observation_date
     """
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("region_id", "STRING", region_id),
-            bigquery.ScalarQueryParameter("start_date", "DATE", start_date),
-            bigquery.ScalarQueryParameter("end_date", "DATE", end_date),
-        ]
+    return run_clickhouse_query(
+        sql,
+        {
+            "region_id": region_id,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
     )
-    df = client.query(query, job_config=job_config).to_dataframe()
-    return df
 
 
 @st.cache_data(ttl=300)
 def fetch_precip_windows(region_id: str, window_days: tuple[int, int] = (7, 30)) -> pd.DataFrame:
     short_window, long_window = window_days
-    query = f"""
+
+    if IS_PROD:
+        client = get_bigquery_client()
+        table = ensure_bigquery_table(client)
+        query = f"""
+            SELECT
+              observation_date,
+              region_id,
+              AVG(avg_temp_c) OVER (PARTITION BY region_id ORDER BY observation_date ROWS BETWEEN {short_window - 1} PRECEDING AND CURRENT ROW) AS avg_temp_{short_window}d,
+              SUM(total_prcp_mm) OVER (PARTITION BY region_id ORDER BY observation_date ROWS BETWEEN {short_window - 1} PRECEDING AND CURRENT ROW) AS prcp_{short_window}d,
+              SUM(total_prcp_mm) OVER (PARTITION BY region_id ORDER BY observation_date ROWS BETWEEN {long_window - 1} PRECEDING AND CURRENT ROW) AS prcp_{long_window}d
+            FROM {table}
+            WHERE region_id = @region_id
+            ORDER BY observation_date
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("region_id", "STRING", region_id)]
+        )
+        return client.query(query, job_config=job_config).to_dataframe()
+
+    sql = f"""
         SELECT
           observation_date,
           region_id,
-          AVG(avg_temp_c) OVER (PARTITION BY region_id ORDER BY observation_date ROWS BETWEEN {short_window - 1} PRECEDING AND CURRENT ROW) AS avg_temp_{short_window}d,
-          SUM(total_prcp_mm) OVER (PARTITION BY region_id ORDER BY observation_date ROWS BETWEEN {short_window - 1} PRECEDING AND CURRENT ROW) AS prcp_{short_window}d,
-          SUM(total_prcp_mm) OVER (PARTITION BY region_id ORDER BY observation_date ROWS BETWEEN {long_window - 1} PRECEDING AND CURRENT ROW) AS prcp_{long_window}d
-        FROM {FULL_TABLE}
-        WHERE region_id = @region_id
+          avg(avg_temp_c) OVER (PARTITION BY region_id ORDER BY observation_date ROWS BETWEEN {short_window - 1} PRECEDING AND CURRENT ROW) AS avg_temp_{short_window}d,
+          sum(total_prcp_mm) OVER (PARTITION BY region_id ORDER BY observation_date ROWS BETWEEN {short_window - 1} PRECEDING AND CURRENT ROW) AS prcp_{short_window}d,
+          sum(total_prcp_mm) OVER (PARTITION BY region_id ORDER BY observation_date ROWS BETWEEN {long_window - 1} PRECEDING AND CURRENT ROW) AS prcp_{long_window}d
+        FROM {CH_TABLE}
+        WHERE region_id = %(region_id)s
         ORDER BY observation_date
     """
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("region_id", "STRING", region_id)]
-    )
-    df = client.query(query, job_config=job_config).to_dataframe()
-    return df
+    return run_clickhouse_query(sql, {"region_id": region_id})
 
 
 def region_summary_page(selected_date: date) -> None:
@@ -140,7 +255,15 @@ PAGES = {
 st.set_page_config(page_title="Skyhealth Climate Dashboard", layout="wide")
 st.title("Skyhealth Climate Dashboard")
 
-available_dates = load_available_dates()
+try:
+    available_dates = load_available_dates()
+except DataSourceUnavailable as exc:
+    st.error(str(exc))
+    st.stop()
+except gexc.GoogleAPICallError as exc:  # pragma: no cover - network failure
+    st.error(f"BigQuery query failed: {exc.message}")
+    st.stop()
+
 if not available_dates:
     st.warning("No gold data available yet. Ingest and publish a partition to continue.")
     st.stop()
@@ -150,7 +273,15 @@ selected_date = st.sidebar.selectbox(
     available_dates,
     format_func=lambda d: d.strftime("%Y-%m-%d"),
 )
-regions = load_regions()
+
+try:
+    regions = load_regions()
+except DataSourceUnavailable as exc:
+    st.error(str(exc))
+    st.stop()
+except gexc.GoogleAPICallError as exc:  # pragma: no cover - network failure
+    st.error(f"BigQuery query failed: {exc.message}")
+    st.stop()
 
 page = st.sidebar.radio("View", list(PAGES.keys()))
 

@@ -6,6 +6,7 @@ locals {
   silver_bucket_name      = "${local.project_prefix}-silver"
   gold_bucket_name        = "${local.project_prefix}-gold"
   checkpoints_bucket_name = "${local.project_prefix}-checkpoints"
+  warehouse_bucket_name   = "${local.project_prefix}-warehouse"
   dataset_id              = "skyhealth_${local.env}_gold"
   dagster_vm_name         = "${local.name_prefix}-dagster"
   dagster_secret_id       = "${local.name_prefix}-dagster-sql-password"
@@ -48,6 +49,10 @@ locals {
     checkpoints = {
       name      = local.checkpoints_bucket_name
       retention = var.bronze_retention_days
+    }
+    warehouse = {
+      name      = local.warehouse_bucket_name
+      retention = var.gold_retention_days
     }
   }
   dagster_project_roles = [

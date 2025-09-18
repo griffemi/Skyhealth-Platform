@@ -1,12 +1,11 @@
 __pycache__/
 *.pyc
 .env
-lake/dev.duckdb
-dbt/target/
-dbt/logs/
 .terraform/
 *.tfstate*
 *.egg-info/
 .DS_Store
+exports/
+medallion/
 
 great_expectations/uncommitted/

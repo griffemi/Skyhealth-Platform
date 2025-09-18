@@ -8,12 +8,12 @@ from pyspark.sql import DataFrame, SparkSession, functions as F
 from skyhealth.config import export_path, settings
 from skyhealth.validation import validate_gold
 from spark.jobs.utils.cli import base_parser
-from spark.jobs.utils.io import merge_delta_table
+from spark.jobs.utils.io import merge_iceberg_table
 from spark.jobs.utils.log import configure
 from spark.jobs.utils.session import get_spark
 
-SILVER_TABLE = settings.delta_table_uri("silver", "climate_daily_features")
-GOLD_TABLE = settings.delta_table_uri("gold", "climate_daily_summary")
+SILVER_TABLE = settings.iceberg_table_identifier("silver", "climate_daily_features")
+GOLD_TABLE = settings.iceberg_table_identifier("gold", "climate_daily_summary")
 EXPORT_PATH = export_path("climate_daily_summary")
 
 
@@ -25,9 +25,7 @@ def iter_dates(start: date, end: date) -> Iterator[date]:
 
 
 def read_silver_partition(spark: SparkSession, target_date: date) -> DataFrame | None:
-    silver = (
-        spark.read.format("delta").load(SILVER_TABLE).where(F.col("observation_date") == F.lit(target_date))
-    )
+    silver = spark.read.table(SILVER_TABLE).where(F.col("observation_date") == F.lit(target_date))
     if silver.head(1):
         return silver
     return None
@@ -54,7 +52,7 @@ def validate_and_write(spark: SparkSession, gold: DataFrame, target_date: date) 
     if pdf.empty:
         return
     validate_gold(target_date.isoformat(), pdf)
-    merge_delta_table(
+    merge_iceberg_table(
         spark,
         gold,
         GOLD_TABLE,
@@ -85,7 +83,7 @@ def main() -> None:
     parser.add_argument("--range-end")
     args = parser.parse_args()
 
-    spark = get_spark("gold_climate_daily_summary", warehouse_uri=settings.bucket_uri("gold"))
+    spark = get_spark("gold_climate_daily_summary")
     if args.date:
         target = date.fromisoformat(args.date)
         run_range(spark, target, target)

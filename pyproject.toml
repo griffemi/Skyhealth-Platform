@@ -2,7 +2,7 @@
 name = "skyhealth"
 version = "0.1.0"
 description = "Weather ETL platform"
-authors = ["Skyhealth <engineering@skyhealth.local>"]
+authors = ["Emi Griffith <emigriffith@proton.me"]
 packages = [{include = "spark"}, {include = "apps"}, {include = "skyhealth"}]
 
 [tool.poetry.dependencies]
@@ -10,16 +10,18 @@ python = ">=3.13,<3.14"
 dagster = "^1.9.3"
 dagster-graphql = "^1.9.3"
 dagster-webserver = "^1.9.3"
-pyspark = "^4.0.0"
-delta-spark = "^4.0.0"
+pyspark = "^3.5.0"
 streamlit = "^1.49.0"
 folium = "^0.20.0"
 google-cloud-storage = "^2.19.0"
 google-cloud-bigquery = "^3.36.0"
 google-cloud-compute = "^1.37.0"
 pydantic = "^2.9.2"
+pydantic-settings = "^2.9.0"
 duckdb = "^1.3.2"
 pandas = "^2.2.3"
+pyarrow = "^21.0.0"
+clickhouse-connect = "^0.7.19"
 requests = "^2.32.3"
 
 [tool.poetry.group.dev.dependencies]

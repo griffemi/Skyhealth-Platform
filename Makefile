@@ -51,7 +51,7 @@ dagster-dev: ## Run Dagster UI + daemon in dev mode
 >poetry run dagster dev -m skyhealth.orchestration.definitions
 
 dagster-materialize: ## Materialize Dagster Bronze → Publish assets for one partition
->poetry run dagster asset materialize --select bronze_openmeteo_daily+publish_gold_to_bigquery --partition $(PARTITION)
+>poetry run dagster asset materialize --select bronze_openmeteo_daily+publish_gold_partition_asset --partition $(PARTITION)
 
 iceberg-housekeeping: ## Clean up Iceberg snapshots and orphan files
 >poetry run dagster asset materialize --select iceberg_housekeeping

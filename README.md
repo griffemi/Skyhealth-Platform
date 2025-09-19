@@ -104,7 +104,7 @@ Dagster defines daily-partitioned assets:
 1. **`bronze_openmeteo_daily`** – fetches Open-Meteo observations, landing an Iceberg partition in Bronze.
 2. **`silver_climate_daily_features`** – derives heating/cooling degree days, precipitation flags, and runs Pandas validations.
 3. **`gold_climate_daily_summary`** – aggregates per-region metrics, validates, then publishes downstream.
-4. **`publish_gold_to_bigquery`** – publishes the partition downstream (BigQuery in prod; ClickHouse in non-prod for local analytics).
+4. **`publish_gold_partition_asset`** – publishes the partition downstream (BigQuery in prod; ClickHouse in non-prod for local analytics).
 5. **`iceberg_housekeeping`** – weekly snapshot expiry + orphan cleanup for Bronze/Silver/Gold tables.
 
 A daily schedule (`daily_iceberg_schedule`, 03:00 UTC) materializes Bronze→Gold→Publish. A `bronze_partition_sensor` catches missing bronze partitions and triggers catch-up runs. Weekly housekeeping runs every Monday at 06:00 UTC via `weekly_iceberg_housekeeping`.

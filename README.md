@@ -29,12 +29,13 @@ Skyhealth delivers a daily Bronze → Silver → Gold weather lake on Google Clo
 ## Getting Started Locally
 
 1. Clone the repo and install dependencies: `make init` (runs `poetry install --no-root`).
-2. Copy or create a `.env` file if you need to override defaults from `skyhealth.config.Settings` (project IDs, bucket URIs, etc.).
+2. Copy or create a `.env` file if you need to override defaults from `pipelines.config.Settings` (project IDs, bucket URIs, etc.).
 3. List available targets any time with `make help`.
 4. Start the local ClickHouse instance: `make clickhouse-up` (required before publishing data locally).
 5. Spin up the Dagster UI locally: `make dagster-dev`.
-6. Materialize a development partition end-to-end: `make pipeline-dev PARTITION=2024-07-01`.
-7. Explore the Streamlit dashboard against your dev data: `make streamlit-dev`.
+6. Materialize a development partition end-to-end through Dagster: `make pipeline-dev PARTITION=2024-07-01`.
+7. Backfill an arbitrary range when you need historical reprocessing: `make dagster-backfill START=2024-06-01 END=2024-06-07`.
+8. Explore the Streamlit dashboard against your dev data: `make streamlit-dev`.
 
 `PARTITION` defaults to today's date (`date -I`). Override it either by passing `PARTITION=YYYY-MM-DD` when you invoke a target or by exporting it in your shell.
 
@@ -46,7 +47,7 @@ Local data and Iceberg lakehouse state live under `./lake/`; use `make nuke-pave
 
 ## Configuration
 
-Runtime configuration is provided by `skyhealth.config.Settings`. Important fields include:
+Runtime configuration is provided by `pipelines.config.Settings`. Important fields include:
 
 - `env` / `region` / `project_id` – logical environment naming.
 - `bronze_bucket`, `silver_bucket`, `gold_bucket`, `checkpoints_bucket` – remote GCS URIs; fall back to the local lake otherwise.
@@ -56,7 +57,7 @@ Runtime configuration is provided by `skyhealth.config.Settings`. Important fiel
 - `duckdb_path` – local DuckDB catalog for ad hoc exploration.
 - `clickhouse_*` – host, port, credentials, and database/table used for local serving (defaults match `make clickhouse-up`).
 
-Settings read from `.env` by default; see `skyhealth/config.py` for the full list.
+Settings read from `.env` by default; see `pipelines/config.py` for the full list.
 
 ---
 
@@ -68,14 +69,12 @@ Settings read from `.env` by default; see `skyhealth/config.py` for the full lis
 | `make init` | Install the Poetry environment. |
 | `make lint` / `make fmt` / `make test` | Ruff linting, Black formatting, and pytest. |
 | `make ci` | Run lint, format, and tests sequentially (local CI smoke test). |
-| `make spark-bronze PARTITION=...` | Backfill a single Bronze partition. |
-| `make spark-silver PARTITION=...` | Build Silver features for a partition. |
-| `make spark-gold PARTITION=...` | Build Gold summary for a partition. |
-| `make publish-bq PARTITION=...` | Publish Gold to ClickHouse locally or BigQuery in prod. |
+| `make publish-bq PARTITION=...` | Publish the selected Gold partition to ClickHouse (dev) or BigQuery (prod). |
 | `make clickhouse-up` | Start a disposable ClickHouse server in Docker. |
-| `make pipeline-dev PARTITION=...` | Bronze → Silver → Gold → Publish (ClickHouse locally / BigQuery in prod). |
+| `make pipeline-dev PARTITION=...` | Run the daily Dagster asset job for a specific partition. |
+| `make dagster-backfill START=... [END=...] [LOCATION_SET=...]` | Execute the Dagster backfill job across a custom date range. |
 | `make dagster-dev` | Run Dagster UI and daemon locally. |
-| `make dagster-materialize PARTITION=...` | Trigger Dagster assets for a single partition. |
+| `make dagster-materialize PARTITION=...` | Trigger the Bronze → Gold asset selection for a partition. |
 | `make iceberg-housekeeping` | Run the Iceberg maintenance asset. |
 | `make validation-snapshots` | Print the path to Great Expectations HTML docs. |
 | `make streamlit-dev` | Launch the Streamlit dashboard. |

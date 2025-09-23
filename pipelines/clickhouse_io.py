@@ -7,13 +7,12 @@ import pandas as pd
 from clickhouse_connect import get_client
 from clickhouse_connect.driver import exceptions as ch_exc
 
-from skyhealth.config import settings
+from pipelines.config import settings
 
 __all__ = [
-    "ensure_schema",
-    "replace_partition",
-    "query_dataframe",
     "ClickHouseError",
+    "ClickHousePublisher",
+    "query_dataframe",
 ]
 
 ClickHouseError = ch_exc.ClickHouseError
@@ -90,21 +89,6 @@ def _prepare_dataframe(pdf: pd.DataFrame, target_date: date) -> pd.DataFrame:
     return df
 
 
-def replace_partition(pdf: pd.DataFrame, target_date: date) -> None:
-    """Replace a partition in ClickHouse with the provided pandas frame."""
-    ensure_schema()
-    df = _prepare_dataframe(pdf, target_date)
-    client = get_client(**_client_kwargs())
-    try:
-        client.command(
-            f"ALTER TABLE {_fq_table()} DELETE WHERE observation_date = toDate('%s') SETTINGS mutations_sync = 1"
-            % target_date.isoformat()
-        )
-        client.insert_df(settings.clickhouse_table, df, column_names=_TABLE_COLUMNS)
-    finally:
-        client.close()
-
-
 def query_dataframe(sql: str, parameters: dict[str, Any] | None = None) -> pd.DataFrame:
     ensure_schema()
     client = get_client(**_client_kwargs())
@@ -112,3 +96,20 @@ def query_dataframe(sql: str, parameters: dict[str, Any] | None = None) -> pd.Da
         return client.query_df(sql, parameters=parameters)
     finally:
         client.close()
+
+
+class ClickHousePublisher:
+    """Lightweight wrapper to publish Gold partitions into ClickHouse."""
+
+    def publish(self, pdf: pd.DataFrame, target_date: date) -> None:
+        ensure_schema()
+        df = _prepare_dataframe(pdf, target_date)
+        client = get_client(**_client_kwargs())
+        try:
+            client.command(
+                f"ALTER TABLE {_fq_table()} DELETE WHERE observation_date = toDate('%s') SETTINGS mutations_sync = 1"
+                % target_date.isoformat()
+            )
+            client.insert_df(settings.clickhouse_table, df, column_names=_TABLE_COLUMNS)
+        finally:
+            client.close()

@@ -1,6 +1,6 @@
 from pyspark.sql import SparkSession
 
-from skyhealth.config import settings
+from pipelines.config import settings
 
 ICEBERG_PACKAGE = "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.10.0"
 
@@ -9,7 +9,7 @@ def get_spark(app_name: str = "skyhealth", warehouse_uri: str | None = None) -> 
     warehouse = warehouse_uri or settings.iceberg_warehouse()
     catalog = settings.iceberg_catalog
     builder = (
-        SparkSession.builder.appName(app_name)
+        SparkSession.Builder().appName(app_name)
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
         .config(f"spark.sql.catalog.{catalog}", "org.apache.iceberg.spark.SparkCatalog")
         .config(f"spark.sql.catalog.{catalog}.type", "hadoop")

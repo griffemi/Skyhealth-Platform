@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from skyhealth.config import settings
+from pipelines.config import settings
 
 
 class ValidationError(Exception):

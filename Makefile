@@ -1,9 +1,13 @@
-.PHONY: help init lint fmt test ci dagster-dev dagster-materialize spark-bronze spark-silver spark-gold publish-bq pipeline-dev streamlit-dev iceberg-housekeeping nuke-pave validation-snapshots clickhouse-up
+.PHONY: help init lint fmt test ci dagster-dev dagster-materialize dagster-backfill publish-bq pipeline-dev streamlit-dev iceberg-housekeeping nuke-pave validation-snapshots clickhouse-up
 .RECIPEPREFIX := >
 .DEFAULT_GOAL := help
 
 DATE ?= $(shell date -I)
 PARTITION ?= $(DATE)
+START ?= $(PARTITION)
+END ?= $(START)
+
+# LOCATION_SET defaults dynamically inside dagster-backfill
 
 help: ## List supported targets
 >@printf "Usage: make <target>\n\nTargets:\n"
@@ -26,38 +30,56 @@ ci: ## Run lint, format check, and tests
 >$(MAKE) fmt
 >$(MAKE) test
 
-spark-bronze: ## Backfill a single Bronze partition
->poetry run python spark/jobs/bronze_openmeteo.py --mode backfill --range-start $(PARTITION) --range-end $(PARTITION)
-
-spark-silver: ## Build a Silver partition from Bronze data
->poetry run python spark/jobs/silver_climate_daily_features.py --date $(PARTITION)
-
-spark-gold: ## Produce a Gold partition from Silver features
->poetry run python spark/jobs/gold_climate_daily_summary.py --date $(PARTITION)
-
 publish-bq: ## Publish Gold: ClickHouse (dev) or BigQuery (prod)
->poetry run python -m skyhealth.publish_bigquery --date $(PARTITION)
+>poetry run python -m pipelines.publish_bigquery --date $(PARTITION)
 
-pipeline-dev: ## Run Bronze → Silver → Gold → BigQuery locally
->$(MAKE) spark-bronze PARTITION=$(PARTITION)
->$(MAKE) spark-silver PARTITION=$(PARTITION)
->$(MAKE) spark-gold PARTITION=$(PARTITION)
->$(MAKE) publish-bq PARTITION=$(PARTITION)
+pipeline-dev: ## Materialize Bronze → Gold assets for one partition via Dagster
+>poetry run dagster job execute -m pipelines.definitions -j daily_partition_job --partition $(PARTITION)
 
 streamlit-dev: ## Launch the Streamlit dashboard locally
 >poetry run streamlit run apps/streamlit_app.py
 
 dagster-dev: ## Run Dagster UI + daemon in dev mode
->poetry run dagster dev -m skyhealth.orchestration.definitions
+>poetry run dagster dev -m pipelines.definitions
 
 dagster-materialize: ## Materialize Dagster Bronze → Publish assets for one partition
->poetry run dagster asset materialize --select bronze_openmeteo_daily+publish_gold_partition_asset --partition $(PARTITION)
+>poetry run dagster asset materialize --select bronze_openmeteo_daily+publish_gold_partition_asset --partition $(PARTITION) -m pipelines.definitions
+
+dagster-backfill: ## Backfill Bronze → Gold for an arbitrary date range via Dagster job
+>START=$(START) END=$(END) LOCATION_SET=$(LOCATION_SET) poetry run python - <<'PY'
+import json
+import os
+from pathlib import Path
+from pipelines.config import settings
+
+start = os.environ.get("START")
+if not start:
+    raise SystemExit("START is required")
+end = os.environ.get("END") or start
+location = os.environ.get("LOCATION_SET") or settings.locations_file
+
+payload = {
+    "ops": {
+        "prepare_backfill": {
+            "config": {
+                "start": start,
+                "end": end,
+                "location_set": location,
+            }
+        }
+    }
+}
+
+Path(".dagster_backfill.json").write_text(json.dumps(payload))
+PY
+>poetry run dagster job execute -m pipelines.definitions -j climate_backfill_job -c .dagster_backfill.json; \
+  STATUS=$$?; rm -f .dagster_backfill.json; exit $$STATUS
 
 iceberg-housekeeping: ## Clean up Iceberg snapshots and orphan files
->poetry run dagster asset materialize --select iceberg_housekeeping
+>poetry run dagster asset materialize --select iceberg_housekeeping -m pipelines.definitions
 
 validation-snapshots: ## Print the local path where validation docs are written
->python -c "from skyhealth.config import settings; print(settings.ge_data_docs_path)"
+>python -c "from pipelines.config import settings; print(settings.ge_data_docs_path)"
 
 nuke-pave: ## Danger! Reset the local lake directories after explicit confirmation
 >@read -p "This will DELETE local lake data. Type 'DELETE' to continue: " CONFIRM; \

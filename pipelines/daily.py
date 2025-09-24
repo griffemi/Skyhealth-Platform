@@ -17,10 +17,14 @@ from dagster import (
 )
 from pyspark.sql import SparkSession, functions as F
 
+from pipelines.assets import (
+    bronze_openmeteo,
+    gold_climate_daily_summary,
+    silver_climate_daily_features,
+)
 from pipelines.config import settings
 from pipelines.publish_bigquery import publish_gold_partition
-from .jobs import bronze_openmeteo, gold_climate_daily_summary, silver_climate_daily_features
-from .jobs.utils.session import get_spark
+from pipelines.utils.session import get_spark
 
 __all__ = [
     "spark_session_resource",

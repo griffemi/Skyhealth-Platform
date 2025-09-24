@@ -10,7 +10,7 @@ from pyspark.errors.exceptions.base import AnalysisException
 
 from pipelines.clickhouse_io import ClickHouseError, ClickHousePublisher
 from pipelines.config import settings
-from .jobs.utils.session import get_spark
+from pipelines.utils.session import get_spark
 
 GOLD_TABLE = settings.iceberg_table_identifier("gold", "climate_daily_summary")
 BQ_TABLE_NAME = "climate_daily_summary"

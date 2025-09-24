@@ -7,10 +7,15 @@ from typing import Callable, Sequence
 from dagster import AssetExecutionContext, Field, job, op
 from pyspark.sql import SparkSession
 
+from pipelines.assets import (
+    bronze_openmeteo,
+    gold_climate_daily_summary,
+    silver_climate_daily_features,
+)
+
 from pipelines.config import settings
 from pipelines.publish_bigquery import publish_gold_partition
 from .daily import spark_session_resource
-from .jobs import bronze_openmeteo, gold_climate_daily_summary, silver_climate_daily_features
 
 __all__ = [
     "BackfillConfig",
@@ -24,7 +29,7 @@ class BackfillConfig:
     start: date
     end: date
     location_set: str
-    locations: Sequence[bronze_openmeteo.Location]
+    locations: Sequence[bronze_openmeteo.Location] # type: ignore
 
     @property
     def window(self) -> tuple[date, date]:

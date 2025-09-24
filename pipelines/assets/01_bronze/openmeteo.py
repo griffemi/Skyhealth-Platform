@@ -10,9 +10,9 @@ from pyspark.sql import Row, SparkSession
 from typing_extensions import override
 
 from pipelines.config import settings
-from .job import Job
-from .utils.io import merge_iceberg_table
-from .utils.schemas import BRONZE_OPENMETEO_SCHEMA
+from pipelines.assets.job import Job
+from pipelines.utils.io import merge_iceberg_table
+from pipelines.utils.schemas import BRONZE_OPENMETEO_SCHEMA
 
 API_URL = "https://api.open-meteo.com/v1/forecast"
 BRONZE_TABLE = settings.iceberg_table_identifier("bronze", "openmeteo_daily")

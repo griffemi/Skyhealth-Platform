@@ -6,7 +6,7 @@ from pyspark.sql import SparkSession, functions as F
 
 from pipelines.config import export_path, settings
 from pipelines.validation import validate_silver
-from .job import Job, frame_to_pandas, persist_partition, read_partition
+from pipelines.assets.job import Job, frame_to_pandas, persist_partition, read_partition
 
 BRONZE_TABLE = settings.iceberg_table_identifier("bronze", "openmeteo_daily")
 SILVER_TABLE = settings.iceberg_table_identifier("silver", "climate_daily_features")

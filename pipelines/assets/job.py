@@ -61,7 +61,7 @@ def persist_partition(
     export_path: str | None = None,
     partition_cols: Sequence[str] | None = None,
 ) -> None:
-    from .utils.io import merge_iceberg_table
+    from pipelines.utils.io import merge_iceberg_table
 
     merge_iceberg_table(
         df,

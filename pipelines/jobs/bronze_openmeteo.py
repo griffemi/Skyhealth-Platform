@@ -89,13 +89,7 @@ class BronzeOpenMeteoJob(Job):
         if not rows:
             return
         df = spark.createDataFrame(rows, schema=BRONZE_OPENMETEO_SCHEMA)
-        merge_iceberg_table(
-            spark,
-            df,
-            BRONZE_TABLE,
-            ["location_id", "observation_date"],
-            partition_cols=["ingest_date"],
-        )
+        merge_iceberg_table(df, BRONZE_TABLE )
 
 
 bronze_job = BronzeOpenMeteoJob()

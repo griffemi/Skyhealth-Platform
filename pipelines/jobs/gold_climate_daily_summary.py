@@ -42,7 +42,6 @@ class GoldClimateDailySummaryJob(Job):
             spark,
             gold,
             GOLD_TABLE,
-            ["region_id", "observation_date"],
             export_path=EXPORT_PATH,
             partition_cols=["ingest_date"],
         )

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Callable, Sequence
 
-from dagster import Field, job, op
+from dagster import AssetExecutionContext, Field, job, op
 from pyspark.sql import SparkSession
 
 from pipelines.config import settings
 from pipelines.publish_bigquery import publish_gold_partition
-from .daily import _run_with_spark, spark_session_resource
+from .daily import spark_session_resource
 from .jobs import bronze_openmeteo, gold_climate_daily_summary, silver_climate_daily_features
 
 __all__ = [
@@ -23,7 +24,7 @@ class BackfillConfig:
     start: date
     end: date
     location_set: str
-    locations: list[bronze_openmeteo.Location]
+    locations: Sequence[bronze_openmeteo.Location]
 
     @property
     def window(self) -> tuple[date, date]:
@@ -57,6 +58,20 @@ BACKFILL_CONFIG_SCHEMA = {
 }
 
 
+def _run_with_window(
+    context: AssetExecutionContext,
+    window: tuple[date, date],
+    fn: Callable[[SparkSession, tuple[date, date]], object | None],
+    *,
+    log_message: str | None = None,
+) -> object | None:
+    spark = context.resources.spark_session
+    if log_message:
+        start_date, end_date = window
+        context.log.info(log_message, f"{start_date.isoformat()}→{end_date.isoformat()}")
+    return fn(spark, window)
+
+
 @op(config_schema=BACKFILL_CONFIG_SCHEMA)
 def prepare_backfill(context) -> BackfillConfig:
     return BackfillConfig.from_mapping(context.op_config)
@@ -64,10 +79,16 @@ def prepare_backfill(context) -> BackfillConfig:
 
 @op(required_resource_keys={"spark_session"})
 def bronze_backfill(context, config: BackfillConfig) -> BackfillConfig:
-    _run_with_spark(
+    def materialize_bronze_window(spark: SparkSession, window: tuple[date, date]) -> None:
+        start_date, end_date = window
+        bronze_openmeteo.bronze_job.run_range(
+            spark, start_date, end_date
+        )
+
+    _run_with_window(
         context,
-        bronze_openmeteo.bronze_job.run_range,
-        partition_value=config.window,
+        config.window,
+        materialize_bronze_window,
         log_message="Backfilling Bronze window %s",
     )
     return config
@@ -83,10 +104,10 @@ def silver_backfill(context, config: BackfillConfig) -> BackfillConfig:
             spark, start_date, end_date
         )
 
-    _run_with_spark(
+    _run_with_window(
         context,
+        config.window,
         materialize_silver_window,
-        partition_value=config.window,
         log_message="Backfilling Silver window %s",
     )
     return config
@@ -94,10 +115,14 @@ def silver_backfill(context, config: BackfillConfig) -> BackfillConfig:
 
 @op(required_resource_keys={"spark_session"})
 def gold_backfill(context, config: BackfillConfig) -> BackfillConfig:
-    _run_with_spark(
+    def materialize_gold_window(spark: SparkSession, window: tuple[date, date]) -> None:
+        start_date, end_date = window
+        gold_climate_daily_summary.gold_job.run_range(spark, start_date, end_date)
+
+    _run_with_window(
         context,
-        gold_climate_daily_summary.gold_job.run_range,
-        partition_value=config.window,
+        config.window,
+        materialize_gold_window,
         log_message="Backfilling Gold window %s",
     )
     return config
@@ -112,10 +137,10 @@ def publish_backfill(context, config: BackfillConfig) -> None:
         ):
             publish_gold_partition(spark, partition_date)
 
-    _run_with_spark(
+    _run_with_window(
         context,
+        config.window,
         publish_gold_window,
-        partition_value=config.window,
         log_message="Publishing Gold window %s",
     )
 

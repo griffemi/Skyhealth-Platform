@@ -57,7 +57,6 @@ class SilverClimateDailyFeaturesJob(Job):
             spark,
             features,
             SILVER_TABLE,
-            ["location_id", "observation_date"],
             export_path=EXPORT_PATH,
             partition_cols=["ingest_date"],
         )

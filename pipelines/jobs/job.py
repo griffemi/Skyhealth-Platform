@@ -55,9 +55,8 @@ def frame_to_pandas(frame: DataFrame) -> pd.DataFrame | None:
 
 def persist_partition(
     spark: SparkSession,
-    frame: DataFrame,
+    df: DataFrame,
     table_identifier: str,
-    match_keys: Sequence[str],
     *,
     export_path: str | None = None,
     partition_cols: Sequence[str] | None = None,
@@ -65,14 +64,11 @@ def persist_partition(
     from .utils.io import merge_iceberg_table
 
     merge_iceberg_table(
-        spark,
-        frame,
-        table_identifier,
-        match_keys,
-        partition_cols=partition_cols,
+        df,
+        table_identifier
     )
     if export_path:
-        writer = frame.write.mode("overwrite")
+        writer = df.write.mode("overwrite")
         if partition_cols:
             writer = writer.partitionBy(*partition_cols)
         writer.parquet(export_path)

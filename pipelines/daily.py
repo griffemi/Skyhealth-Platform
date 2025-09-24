@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Callable, Optional, TypeVar, cast
 
 from dagster import (
     AssetExecutionContext,
@@ -74,42 +73,17 @@ def _partition_key(context: AssetExecutionContext) -> date:
         )
     return date.fromisoformat(context.partition_key)
 
-def _format_partition_value(partition_value: object) -> str:
-    if isinstance(partition_value, tuple) and len(partition_value) == 2:
-        start_date, end_date = partition_value
-        if isinstance(start_date, date) and isinstance(end_date, date):
-            return f"{start_date.isoformat()}→{end_date.isoformat()}"
-    if isinstance(partition_value, date):
-        return partition_value.isoformat()
-    return str(partition_value)
-
-
-def _run_with_spark(
-    context: AssetExecutionContext,
-    fn: Callable[[SparkSession, date]],
-    log_message: str | None = None,
-) -> object | None:
-    spark = context.resources.spark_session
-    resolved_partition: PartitionT
-    if partition_value is not None:
-        resolved_partition = partition_value
-    else:
-        resolved_partition = cast(PartitionT, _partition_key(context))
-    if log_message:
-        context.log.info(log_message, _format_partition_value(resolved_partition))
-    return fn(spark, resolved_partition)
-
-
 @asset(
     partitions_def=PARTITIONS,
     compute_kind="spark",
     required_resource_keys={"spark_session"},
 )
 def bronze_openmeteo_daily(context: AssetExecutionContext) -> None:
-    _run_with_spark(
-        context,
-        bronze_openmeteo.bronze_job.run_for_date,
-        log_message="Ingesting Open-Meteo data for %s",
+    spark = context.resources.spark_session
+    partition_date = _partition_key(context)
+    context.log.info("Ingesting Open-Meteo data for %s", partition_date.isoformat())
+    bronze_openmeteo.bronze_job.run_for_date(
+        spark, partition_date
     )
 
 
@@ -120,10 +94,11 @@ def bronze_openmeteo_daily(context: AssetExecutionContext) -> None:
     required_resource_keys={"spark_session"},
 )
 def silver_climate_daily_features_asset(context: AssetExecutionContext) -> None:
-    _run_with_spark(
-        context,
-        silver_climate_daily_features.silver_job.run_for_date,
-        log_message="Building silver features for %s",
+    partition_date = _partition_key(context)
+    context.log.info("Building silver features for %s", partition_date.isoformat())
+    
+    silver_climate_daily_features.silver_job.run_for_date(
+        context.resources.spark_session, partition_date
     )
 
 
@@ -134,10 +109,11 @@ def silver_climate_daily_features_asset(context: AssetExecutionContext) -> None:
     required_resource_keys={"spark_session"},
 )
 def gold_climate_daily_summary_asset(context: AssetExecutionContext) -> None:
-    _run_with_spark(
-        context,
-        gold_climate_daily_summary.gold_job.run_for_date,
-        log_message="Building gold summary for %s",
+    partition_date = _partition_key(context)
+    context.log.info("Building gold summary for %s", partition_date.isoformat())
+    
+    gold_climate_daily_summary.gold_job.run_for_date(
+        context.resources.spark_session, partition_date
     )
 
 
@@ -148,10 +124,11 @@ def gold_climate_daily_summary_asset(context: AssetExecutionContext) -> None:
     required_resource_keys={"spark_session"},
 )
 def publish_gold_partition_asset(context: AssetExecutionContext) -> None:
-    _run_with_spark(
-        context,
-        publish_gold_partition,
-        log_message="Publishing gold summary for %s",
+    partition_date = _partition_key(context)
+    context.log.info("Publishing gold summary for %s", partition_date.isoformat())
+    
+    publish_gold_partition(
+        context.resources.spark_session, partition_date
     )
 
 
